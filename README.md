@@ -1,0 +1,273 @@
+# 内网 Python OCR 微服务（FastAPI）
+
+面向 IIS 下 C# 多线程 HTTP 调用的 OCR 服务模板，目标：
+- 稳定并发：每个 worker 进程只加载一份模型，靠多进程扩展
+- 可回溯：保留原始 OCR 行结果（文本、框、分数）
+- 结构化字段必出：字段兜底 + 正则校验 + 缺失清单
+
+## 1. 技术栈
+- FastAPI（HTTP/JSON）
+- PaddleOCR（中文 OCR）
+- Gunicorn + UvicornWorker（多进程）
+- OpenCV（图像预处理 + 质量评分）
+
+## 2. 接口
+
+### `GET /health`
+健康检查。
+
+### `POST /v1/ocr/general`
+通用 OCR（手写/印刷都可），返回原始行结果 + 全文/行文本/平均置信度。
+
+### `POST /v1/ocr/document/{doc_type}`
+证件 OCR（结构化字段 + 原始 OCR + 校验 + 质量）  
+`doc_type` 支持：
+- `idcard`
+- `driver_license`
+- `vehicle_license`
+- `handwriting`（可选）
+
+## 3. 请求方式
+
+### A. multipart/form-data（推荐）
+- 字段：`file`（图片文件）
+
+### B. JSON + base64
+```json
+{
+  "imageBase64": "....",
+  "docType": "idcard",
+  "options": {
+    "maxEdge": 1600
+  }
+}
+```
+
+## 4. 统一返回结构
+```json
+{
+  "success": true,
+  "traceId": "uuid",
+  "elapsedMs": 123,
+  "data": {
+    "docType": "idcard",
+    "fields": {
+      "姓名": { "value": "张三", "confidence": 0.88, "source": "anchor:姓名" }
+    },
+    "text": "姓名 张三\n..."
+  }
+}
+```
+
+## 5. 与 C# DTO 对齐建议
+- `fields` 中字段名使用中文键（如 `身份证号`、`准驾车型`、`车牌号`），可直接映射你的业务类。
+- 若字段未识别，仍会输出该键：`value=""`、`source="fallback_missing"`（不再单独返回 `missingFields`）。
+- 日期字段统一为 `yyyy-MM-dd` 字符串，C# 端可按 `DateTime?` 解析。
+
+## 6. 本地运行
+```powershell
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+python -m gunicorn -c gunicorn_conf.py app.main:app
+```
+或：
+```powershell
+.\run.ps1 -Host 0.0.0.0 -Port 8000
+```
+
+## 7. IIS 部署（内网）
+常见方式是 IIS 反向代理到本服务（例如 `http://127.0.0.1:8000`）：
+- IIS：站点启用 ARR + URL Rewrite
+- `/health` 用于探活
+- C# 客户端统一反序列化顶层 DTO（`success/traceId/elapsedMs/data`）
+
+## 8. 并发与稳定建议
+- 单请求内部保持串行，避免在请求内并发 OCR。
+- 按 CPU 核数调整 `OCR_WORKERS`（默认 `cpu_count/2`）。
+- 生产建议加请求日志（带 `traceId`）与图片留档策略（按合规要求存储）。
+
+## 9. 内网离线部署准备（外网机器先打包）
+内网环境无法联网时，建议在外网机器提前准备 4 类资产，再整体拷贝到内网服务器：
+- 运行时：Python 安装包（建议 3.10.x 或 3.11.x，64 位）
+- 依赖包：项目依赖对应的离线 `wheel` 包
+- Paddle 推理库：`paddlepaddle`（CPU）对应版本 wheel
+- PaddleOCR 模型文件：检测/识别/方向分类模型目录
+
+本项目已内置离线目录：`offline_bundle`，测试通过后可直接整体复制到服务器。
+
+推荐离线包目录结构（项目内已创建）：
+```text
+offline_bundle/
+  python/
+    python-3.10.x-amd64.exe
+  wheels/
+    requirements-lock.txt
+    *.whl
+  paddle/
+    paddlepaddle-*.whl            # CPU
+  models/
+    ch_PP-OCRv4_det_infer/
+    ch_PP-OCRv4_rec_infer/
+    ch_ppocr_mobile_v2.0_cls_infer/
+  project/
+    paddleOcr/                    # 当前项目代码
+```
+
+## 10. 外网机器准备步骤（可联网）
+
+### 10.0 一键准备（推荐）
+项目内已提供脚本：
+- `scripts/prepare_offline_assets.ps1`
+- `scripts/download_models.py`
+
+在外网机器执行：
+```powershell
+cd E:\paddleOcr
+.\scripts\prepare_offline_assets.ps1 -PythonExe python -PaddleVersion 3.3.1
+```
+
+执行后会把依赖 wheel、Paddle CPU wheel、PaddleOCR 模型下载到 `offline_bundle` 对应目录。
+
+### 10.1 固定 Python 与依赖版本
+建议先生成锁定文件，避免内网安装时版本漂移：
+```powershell
+pip freeze > requirements-lock.txt
+```
+
+### 10.2 下载离线 wheel（含传递依赖）
+在外网机器执行：
+```powershell
+mkdir wheels
+pip download -r requirements.txt -d wheels
+pip download -r requirements-lock.txt -d wheels
+```
+
+### 10.3 下载 Paddle 推理库（仅 CPU）
+- 下载 `paddlepaddle` 对应 Python 版本 wheel
+
+示例（仅示意，版本以 Paddle 官网兼容矩阵为准）：
+```powershell
+pip download paddlepaddle==<cpu_version> -d paddle
+```
+
+### 10.4 准备 PaddleOCR 模型文件
+需提前下载并放入内网可访问目录（例如 `E:\ocr-models\`），至少包括：
+- 文本检测模型（det）
+- 文本识别模型（rec）
+- 方向分类模型（cls）
+
+建议按固定目录存放，后续在服务启动参数或环境变量中指定模型路径。
+
+## 11. 内网服务器需要安装的内容（清单）
+
+### 11.1 必装项
+- Windows x64（Windows Server 2016 / Windows 10 / Windows 11）
+- Python 运行时（与外网 wheel 对应版本）
+- VC++ 运行库（若部分二进制包要求）
+- 项目代码（本仓库）
+- 离线 wheels 目录
+- Paddle 推理库 wheel（CPU）
+- PaddleOCR 模型目录（det/rec/cls）
+
+## 12. 内网服务器安装步骤（离线）
+建议直接复制整个项目目录（包含 `offline_bundle`）到内网服务器。  
+以下示例假设项目路径为 `E:\paddleOcr`：
+
+1) 安装 Python  
+2) 创建虚拟环境并激活  
+3) 先安装 Paddle，再安装业务依赖  
+4) 模型目录使用项目内相对路径（默认无需改）  
+5) 启动服务并做健康检查
+
+示例命令：
+```powershell
+cd E:\paddleOcr
+python -m venv .venv
+.venv\Scripts\activate
+
+# 先安装 Paddle（CPU）
+pip install --no-index --find-links .\offline_bundle\paddle paddlepaddle==<cpu_version>
+
+# 再安装项目依赖
+pip install --no-index --find-links .\offline_bundle\wheels -r requirements.txt
+
+# 启动
+python -m gunicorn -c gunicorn_conf.py app.main:app
+```
+
+### 12.1 程序中的模型相对路径（默认）
+程序默认读取以下相对路径（位于项目根目录）：
+- `offline_bundle/models/ch_PP-OCRv4_det_infer`
+- `offline_bundle/models/ch_PP-OCRv4_rec_infer`
+- `offline_bundle/models/ch_ppocr_mobile_v2.0_cls_infer`
+
+如需覆盖，可设置环境变量：
+- `OCR_DET_MODEL_DIR`
+- `OCR_REC_MODEL_DIR`
+- `OCR_CLS_MODEL_DIR`
+
+## 13. 启动服务指令（Windows）
+推荐在项目目录执行：
+```powershell
+cd E:\paddleOcr
+.\.venv\Scripts\activate
+
+# 启动方式 1
+python -m gunicorn -c gunicorn_conf.py app.main:app
+
+# 启动方式 2（脚本）
+.\run.ps1 -Host 0.0.0.0 -Port 8000
+```
+
+可选环境变量（按机器核数调整）：
+```powershell
+set OCR_WORKERS=4
+set OCR_TIMEOUT=120
+set OCR_BIND=0.0.0.0:8000
+```
+
+## 14. 配置开机自动启动（Windows Server 2016 / 10 / 11）
+推荐使用“任务计划程序”，稳定且系统自带。
+
+### 14.1 创建启动脚本
+新建 `E:\paddleOcr\start_ocr_service.bat`：
+```bat
+@echo off
+cd /d E:\paddleOcr
+call .\.venv\Scripts\activate.bat
+python -m gunicorn -c gunicorn_conf.py app.main:app
+```
+
+### 14.2 任务计划程序配置
+- 打开“任务计划程序” -> “创建任务”
+- 常规：
+  - 名称：`OCRService`
+  - 勾选“使用最高权限运行”
+  - 配置为：`Windows Server 2016 / Windows 10 / Windows 11`
+- 触发器：
+  - 选择“启动时”
+- 操作：
+  - 程序或脚本：`cmd.exe`
+  - 添加参数：`/c E:\paddleOcr\start_ocr_service.bat`
+- 条件/设置：
+  - 取消“仅在使用交流电源时启动”（服务器可忽略）
+  - 勾选“如果任务失败，重新启动”（例如每 1 分钟，重试 3 次）
+
+### 14.3 验证自动启动
+- 重启服务器
+- 访问 `http://127.0.0.1:8000/health`
+- 确认返回 `{"success":true,"status":"ok"}`
+
+## 15. 离线部署校验建议
+- 执行 `GET /health`，确认服务可用
+- 用一张身份证/驾驶证/行驶证样例图调用接口，检查：
+  - `fields` 是否完整输出（缺失字段应返回 `value=""`）
+  - `fields` 每个键是否包含 `value/confidence/source`
+- 在 C# 侧做 20~100 并发压测，观察耗时与超时率，再调整 `OCR_WORKERS`
+
+## 16. 生产落地建议（内网）
+- 把模型目录放在固定路径（如 `E:\ocr-models`），避免误删
+- 固化版本：Python、Paddle、PaddleOCR、模型版本都记录到发布单
+- 每次升级先在预发布内网环境回归再切生产
+
