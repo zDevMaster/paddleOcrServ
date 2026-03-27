@@ -1,0 +1,17 @@
+---
+description: Python/FastAPI coding conventions for this repository
+globs: **/*.py
+alwaysApply: false
+---
+
+# Python FastAPI Conventions
+
+- Use type hints for new functions.
+- Keep endpoint handlers thin; move logic to helper functions when possible.
+- Validate request inputs and return clear HTTP errors.
+- Preserve existing JSON contract unless user asks to change it.
+- Prefer UTF-8 encoded source files.
+
+## OCR-specific notes
+- Keep per-process OCR model singleton behavior.
+- For batch test features, process only pending files when required by spec.

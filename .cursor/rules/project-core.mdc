@@ -1,0 +1,27 @@
+---
+description: Project-wide OCR service and workflow rules
+alwaysApply: true
+---
+
+# PaddleOCR Project Core Rules
+
+## Communication
+- Respond in Simplified Chinese.
+- Keep answers concise and actionable.
+
+## Git Workflow
+- Commit after finishing each requested change set.
+- Never push unless the user explicitly requests push.
+
+## Runtime and Deployment
+- Windows runtime uses `uvicorn`; do not rely on `gunicorn` on Windows.
+- Keep model default paths under `offline_bundle/models/*`.
+- Keep offline deployment assets under `offline_bundle/`.
+
+## API Contract
+- Keep OCR response structure unified: `success`, `traceId`, `elapsedMs`, `data`.
+- Keep `data.fields` as required output, with empty `value` fallback for missing fields.
+
+## Safety
+- Do not remove user test data under `test/data`.
+- Do not commit secrets or credentials.
