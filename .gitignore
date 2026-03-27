@@ -20,6 +20,9 @@ parts/
 sdist/
 var/
 wheels/
+!offline_bundle/
+!offline_bundle/wheels/
+!offline_bundle/wheels/**
 share/python-wheels/
 *.egg-info/
 .installed.cfg
