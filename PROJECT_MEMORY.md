@@ -1,42 +1,65 @@
 # 项目记忆（Project Memory）
 
-> 用于跨机器/新会话快速恢复上下文。更新本文件时请保持精简且准确。
+> 用于跨机器/新会话快速恢复上下文。更新本文件时保持“关键结论优先、可执行优先”。
 
-## 1. 项目目标
-- 内网部署 OCR 微服务（FastAPI + PaddleOCR）。
-- 提供证件识别与通用识别接口，面向 IIS 下 C# HTTP 调用。
+## 1. 项目定位
+- 项目目标：在内网部署 Python OCR 微服务，供 IIS 下 C# 多线程 HTTP 调用。
+- 场景覆盖：身份证、行驶证、驾驶证、手写识别；同时支持人工测试与批量回归。
 
-## 2. 已定接口
+## 2. 当前 API 契约（不可随意破坏）
 - `GET /health`
 - `POST /v1/ocr/general`
-- `POST /v1/ocr/document/{doc_type}`：`idcard` / `vehicle_license` / `driver_license`
+- `POST /v1/ocr/document/{doc_type}`：`idcard` / `vehicle_license` / `driver_license` / `handwriting`
 
-## 3. 返回协议（当前）
+返回结构（已定版）：
 - 顶层：`success`、`traceId`、`elapsedMs`
 - `data`：`docType`、`fields`、`text`
-- 不返回：`raw`、`validation`、`quality`、`missingFields`
-- 缺失字段必须在 `fields` 中返回，`value=""`
+- 已移除：`raw`、`validation`、`quality`、`missingFields`
+- 规则：结构化字段必须输出；缺失字段也要有键，且 `value=""`
 
-## 4. 部署关键点
-- Windows 启动使用 `startup.bat`（内部 `uvicorn` 多进程）。
-- `gunicorn` 不作为 Windows 运行方式。
-- 离线部署依赖目录：`offline_bundle/paddle`、`offline_bundle/wheels`、`offline_bundle/models`
-- 文档：`服务器部署.md`
+## 3. OCR 与抽取策略要点
+- 每个进程内 OCR 模型单例（避免重复加载）。
+- 证件抽取以“关键词锚点 + 正则”组合实现，字段缺失走 `fallback_missing`。
+- 默认模型路径使用相对目录：
+  - `offline_bundle/models/ch_PP-OCRv4_det_infer`
+  - `offline_bundle/models/ch_PP-OCRv4_rec_infer`
+  - `offline_bundle/models/ch_ppocr_mobile_v2.0_cls_infer`
 
-## 5. C# 对接文档
-- 文件：`CSharp-IIS-调用示例.md`
-- 当前示例以 JSON + base64 为主，并包含 base64 工具方法。
+## 4. 部署运行结论（本次会话已验证）
+- Windows 上不要用 `gunicorn` 运行（依赖 `fcntl`，不可用）。
+- Windows 推荐统一用 `startup.bat`（内部 `uvicorn` 多进程）。
+- `run.ps1` 历史上有 `Host` 参数与 PowerShell 内置变量冲突风险，不作为主入口。
+- 内网环境建议设置 `PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=1`，避免联网检查卡顿。
 
-## 6. 测试网站
-- 目录：`test/`
-- 批量测试页：
+## 5. 离线交付目录（当前仓库已具备）
+- `offline_bundle/paddle/`：Paddle CPU 及依赖 wheel
+- `offline_bundle/wheels/`：项目依赖离线 wheel（含 `requirements-lock.txt`）
+- `offline_bundle/models/`：OCR 模型
+- `安装程序/`：Python/VC++ 安装程序
+
+版本一致性关键点：
+- Python 主版本必须匹配 wheel 标签（如 `cp313`）。
+- 离线安装优先用 `offline_bundle/wheels/requirements-lock.txt` 保证可复现。
+
+## 6. 文档地图（按用途）
+- `README.md`：总览与快速入口
+- `服务器部署.md`：内网服务器拷贝、安装、开机自启
+- `CSharp-IIS-调用示例.md`：C# DTO 映射与 base64 调用示例
+- `test/README.md`：测试网站与批量测试说明
+
+## 7. 测试网站（test）能力
+- 入口：`test/start_test_site.bat`，默认 `http://127.0.0.1:9000`
+- 批量页面：
   - `/batch/idcard`
   - `/batch/vehicle_license`
   - `/batch/driver_license`
-- 每次批量可选：`5/10/20/50/100`
-- 仅处理未生成同名 `.json` 的图片，支持断点续跑。
-- `test/data` 已忽略，不入库。
+- 批量规则：
+  - 每次处理批次可选：`5/10/20/50/100`
+  - 仅处理尚未生成同名 `.json` 的图片（断点续跑）
+  - 结果页显示全部图片（含未识别），并支持分页核对
+- 数据目录：`test/data`（已在 `test/.gitignore` 忽略，不入库）
 
-## 7. 协作约定
-- 每次完成变更后执行 git commit。
-- git push 由用户手动控制。
+## 8. 协作约定（用户明确要求）
+- 语言：始终使用简体中文。
+- 每次完成改动后自动 `git commit`。
+- `git push` 由用户手动控制，助手不主动 push。
