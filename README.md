@@ -1,5 +1,10 @@
 # 内网 Python OCR 微服务（FastAPI）
 
+**相关文档**
+
+- **[服务器部署.md](服务器部署.md)**：内网 Windows 服务器拷贝清单、离线安装、`startup.bat` 启动、任务计划开机自启  
+- **[CSharp-IIS-调用示例.md](CSharp-IIS-调用示例.md)**：IIS 场景下 C# 调用示例（JSON base64 等）
+
 面向 IIS 下 C# 多线程 HTTP 调用的 OCR 服务模板，目标：
 - 稳定并发：每个 worker 进程只加载一份模型，靠多进程扩展
 - 可回溯：保留原始 OCR 行结果（文本、框、分数）
@@ -8,7 +13,7 @@
 ## 1. 技术栈
 - FastAPI（HTTP/JSON）
 - PaddleOCR（中文 OCR）
-- Gunicorn + UvicornWorker（多进程）
+- 并发承载：**Linux** 可用 Gunicorn + UvicornWorker；**Windows** 请用项目根目录 `startup.bat`（内部为 uvicorn 多进程）
 - OpenCV（图像预处理 + 质量评分）
 
 ## 2. 接口
@@ -65,22 +70,33 @@
 - 日期字段统一为 `yyyy-MM-dd` 字符串，C# 端可按 `DateTime?` 解析。
 
 ## 6. 本地运行
+
+**Windows（推荐）**  
+安装依赖后，在项目根目录执行 **`startup.bat`**，或与脚本等价的手动命令：
+
 ```powershell
+cd E:\paddleOcr
+.\.venv\Scripts\activate
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
+```
+
+**Linux（可多进程生产）**
+
+```bash
 python -m venv .venv
-.venv\Scripts\activate
+source .venv/bin/activate
 pip install -r requirements.txt
 python -m gunicorn -c gunicorn_conf.py app.main:app
 ```
-或：
-```powershell
-.\run.ps1 -Host 0.0.0.0 -Port 8000
-```
+
+> 说明：`run.ps1` 依赖的参数名可能与 PowerShell 内置变量冲突；Windows 日常请以 **`startup.bat`** 为准。详见 [服务器部署.md](服务器部署.md)。
 
 ## 7. IIS 部署（内网）
 常见方式是 IIS 反向代理到本服务（例如 `http://127.0.0.1:8000`）：
 - IIS：站点启用 ARR + URL Rewrite
 - `/health` 用于探活
 - C# 客户端统一反序列化顶层 DTO（`success/traceId/elapsedMs/data`）
+- 调用示例见 [CSharp-IIS-调用示例.md](CSharp-IIS-调用示例.md)
 
 ## 8. 并发与稳定建议
 - 单请求内部保持串行，避免在请求内并发 OCR。
@@ -171,14 +187,17 @@ pip download paddlepaddle==<cpu_version> -d paddle
 - PaddleOCR 模型目录（det/rec/cls）
 
 ## 12. 内网服务器安装步骤（离线）
+
+**完整步骤（拷贝清单、版本对照、任务计划自启）见 [服务器部署.md](服务器部署.md)。**
+
 建议直接复制整个项目目录（包含 `offline_bundle`）到内网服务器。  
 以下示例假设项目路径为 `E:\paddleOcr`：
 
-1) 安装 Python  
+1) 安装 Python（版本需与 `offline_bundle\wheels` 中 wheel 的 `cp3xx` 一致）  
 2) 创建虚拟环境并激活  
-3) 先安装 Paddle，再安装业务依赖  
+3) 先安装 Paddle（CPU），再安装锁定依赖  
 4) 模型目录使用项目内相对路径（默认无需改）  
-5) 启动服务并做健康检查
+5) 运行 **`startup.bat`** 启动服务并访问 `/health`
 
 示例命令：
 ```powershell
@@ -186,14 +205,14 @@ cd E:\paddleOcr
 python -m venv .venv
 .venv\Scripts\activate
 
-# 先安装 Paddle（CPU）
-pip install --no-index --find-links .\offline_bundle\paddle paddlepaddle==<cpu_version>
+# 先安装 Paddle（CPU，版本与 offline_bundle\paddle 中文件一致）
+pip install --no-index --find-links .\offline_bundle\paddle paddlepaddle==3.3.1
 
-# 再安装项目依赖
-pip install --no-index --find-links .\offline_bundle\wheels -r requirements.txt
+# 再安装项目依赖（与干净环境锁定一致）
+pip install --no-index --find-links .\offline_bundle\wheels -r .\offline_bundle\wheels\requirements-lock.txt
 
-# 启动
-python -m gunicorn -c gunicorn_conf.py app.main:app
+# 启动（Windows）
+.\startup.bat
 ```
 
 ### 12.1 程序中的模型相对路径（默认）
@@ -208,56 +227,24 @@ python -m gunicorn -c gunicorn_conf.py app.main:app
 - `OCR_CLS_MODEL_DIR`
 
 ## 13. 启动服务指令（Windows）
-推荐在项目目录执行：
-```powershell
-cd E:\paddleOcr
-.\.venv\Scripts\activate
 
-# 启动方式 1
-python -m gunicorn -c gunicorn_conf.py app.main:app
+项目根目录执行 **`startup.bat`**（已内置 uvicorn 多进程、`PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK` 等内网友好默认值）。
 
-# 启动方式 2（脚本）
-.\run.ps1 -Host 0.0.0.0 -Port 8000
-```
+可选环境变量（在运行前于同一 cmd 窗口 `set`）：
 
-可选环境变量（按机器核数调整）：
-```powershell
+```bat
 set OCR_WORKERS=4
-set OCR_TIMEOUT=120
-set OCR_BIND=0.0.0.0:8000
+set OCR_PORT=8000
+set OCR_HOST=0.0.0.0
 ```
+
+详细说明见 [服务器部署.md](服务器部署.md) 第 4 节。
 
 ## 14. 配置开机自动启动（Windows Server 2016 / 10 / 11）
-推荐使用“任务计划程序”，稳定且系统自带。
 
-### 14.1 创建启动脚本
-新建 `E:\paddleOcr\start_ocr_service.bat`：
-```bat
-@echo off
-cd /d E:\paddleOcr
-call .\.venv\Scripts\activate.bat
-python -m gunicorn -c gunicorn_conf.py app.main:app
-```
+使用任务计划程序，在**系统启动时**执行项目根目录的 **`startup.bat`**（程序填 `cmd.exe`，参数 `/c "E:\paddleOcr\startup.bat"`，“起始于”填 `E:\paddleOcr`）。
 
-### 14.2 任务计划程序配置
-- 打开“任务计划程序” -> “创建任务”
-- 常规：
-  - 名称：`OCRService`
-  - 勾选“使用最高权限运行”
-  - 配置为：`Windows Server 2016 / Windows 10 / Windows 11`
-- 触发器：
-  - 选择“启动时”
-- 操作：
-  - 程序或脚本：`cmd.exe`
-  - 添加参数：`/c E:\paddleOcr\start_ocr_service.bat`
-- 条件/设置：
-  - 取消“仅在使用交流电源时启动”（服务器可忽略）
-  - 勾选“如果任务失败，重新启动”（例如每 1 分钟，重试 3 次）
-
-### 14.3 验证自动启动
-- 重启服务器
-- 访问 `http://127.0.0.1:8000/health`
-- 确认返回 `{"success":true,"status":"ok"}`
+分步截图级说明与验证方法见 **[服务器部署.md](服务器部署.md) 第 5 节**。
 
 ## 15. 离线部署校验建议
 - 执行 `GET /health`，确认服务可用
