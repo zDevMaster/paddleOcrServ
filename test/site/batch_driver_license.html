@@ -1,0 +1,103 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>椹鹃┒璇佹壒閲忔祴璇?/title>
+  <style>
+    body{font-family:"Microsoft YaHei",Arial,sans-serif;margin:16px;background:#f4f6f8}
+    .top{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:12px;margin-bottom:12px}
+    .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+    input,select,button{height:32px;padding:4px 8px}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .panel{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:10px}
+    .imgbox{height:360px;display:flex;align-items:center;justify-content:center;background:#111827}
+    .imgbox img{max-width:100%;max-height:100%;object-fit:contain}
+    pre{height:360px;overflow:auto;background:#0b1020;color:#d1e7ff;padding:10px;border-radius:8px}
+    .pager{display:flex;gap:8px;align-items:center;margin-top:8px}
+  </style>
+</head>
+<body>
+  <div class="top">
+    <div class="row">
+      <strong>椹鹃┒璇佹壒閲忔祴璇?/strong>
+      <a href="/" style="margin-left:8px">杩斿洖鍏ュ彛</a>
+    </div>
+    <div class="row">
+      <label>OCR 鏈嶅姟鍦板潃</label>
+      <input id="ocrBase" type="text" value="http://127.0.0.1:8000" style="min-width:280px" />
+      <button id="btnHealth">妫€鏌?health</button>
+    </div>
+    <div class="row">
+      <label>鎵规澶у皬</label>
+      <select id="batchSize">
+        <option>5</option><option>10</option><option selected>20</option><option>50</option><option>100</option>
+      </select>
+      <button id="btnRun">鎵归噺娴嬭瘯锛堜粎鏈敓鎴?.json锛?/button>
+      <span id="runInfo"></span>
+    </div>
+    <div class="row">
+      <label>姣忛〉鏉℃暟</label>
+      <select id="pageSize">
+        <option>10</option><option selected>20</option><option>30</option><option>50</option>
+      </select>
+      <button id="btnLoad">鍒锋柊鍒楄〃</button>
+      <span id="stats"></span>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="panel">
+      <h3>宸︿晶锛氬師濮嬪浘鐗囷紙鍚湭璇嗗埆锛?/h3>
+      <div id="fileName"></div>
+      <div class="imgbox"><img id="preview" alt="preview" /></div>
+      <div class="pager">
+        <button id="prev">涓婁竴鏉?/button>
+        <span id="pos"></span>
+        <button id="next">涓嬩竴鏉?/button>
+      </div>
+    </div>
+    <div class="panel">
+      <h3>鍙充晶锛氳瘑鍒粨鏋?JSON</h3>
+      <pre id="jsonBox">绛夊緟鍔犺浇...</pre>
+    </div>
+  </div>
+
+  <script>
+    const DOC_TYPE = "driver_license";
+    let currentPage = 1, currentIndex = 0, lastData = null;
+    const $ = (id)=>document.getElementById(id);
+    async function health(){ const base=$("ocrBase").value.trim(); const r=await fetch(`/api/health?ocrBase=${encodeURIComponent(base)}`); alert(JSON.stringify(await r.json())); }
+    async function runBatch(){
+      $("runInfo").textContent="鎵ц涓?..";
+      const payload={docType:DOC_TYPE,batchSize:parseInt($("batchSize").value,10),ocrBase:$("ocrBase").value.trim()};
+      const r=await fetch("/api/batch/run",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+      const d=await r.json();
+      $("runInfo").textContent=`宸插鐞?${d.processedCount}锛屽け璐?${d.failedCount}锛屽墿浣?${d.pendingAfterRun}`;
+      await loadPage(1);
+    }
+    async function loadPage(page){
+      currentPage=page;
+      const size=parseInt($("pageSize").value,10);
+      const r=await fetch(`/api/batch/results?docType=${DOC_TYPE}&page=${page}&pageSize=${size}`);
+      lastData=await r.json(); currentIndex=0;
+      $("stats").textContent=`鎬绘暟:${lastData.total} 宸茶瘑鍒?${lastData.recognized} 鏈瘑鍒?${lastData.unrecognized} 椤?${lastData.page}`;
+      renderItem();
+    }
+    function renderItem(){
+      const items=(lastData&&lastData.items)||[];
+      if(items.length===0){ $("fileName").textContent="褰撳墠椤垫棤鏁版嵁"; $("preview").src=""; $("jsonBox").textContent=""; $("pos").textContent="0/0"; return; }
+      if(currentIndex<0) currentIndex=0; if(currentIndex>=items.length) currentIndex=items.length-1;
+      const it=items[currentIndex];
+      $("fileName").textContent=`${it.fileName} ${it.jsonExists?"[宸茶瘑鍒玗":"[鏈瘑鍒玗"}`;
+      $("preview").src=it.imageUrl;
+      $("jsonBox").textContent=it.jsonExists?it.jsonText:"灏氭湭鐢熸垚 .json锛堟湭璇嗗埆锛?;
+      $("pos").textContent=`${currentIndex+1}/${items.length}`;
+    }
+    $("btnHealth").onclick=health; $("btnRun").onclick=runBatch; $("btnLoad").onclick=()=>loadPage(currentPage);
+    $("prev").onclick=()=>{currentIndex--;renderItem();}; $("next").onclick=()=>{currentIndex++;renderItem();};
+    loadPage(1);
+  </script>
+</body>
+</html>
+
