@@ -1,55 +1,49 @@
 from __future__ import annotations
 
 import argparse
-import shutil
-import tarfile
-import tempfile
-import urllib.request
 from pathlib import Path
 
-
-MODEL_URLS = {
-    "ch_PP-OCRv4_det_infer": "https://paddleocr.bj.bcebos.com/PP-OCRv4/chinese/ch_PP-OCRv4_det_infer.tar",
-    "ch_PP-OCRv4_rec_infer": "https://paddleocr.bj.bcebos.com/PP-OCRv4/chinese/ch_PP-OCRv4_rec_infer.tar",
-    "ch_ppocr_mobile_v2.0_cls_infer": "https://paddleocr.bj.bcebos.com/dygraph_v2.0/ch/ch_ppocr_mobile_v2.0_cls_infer.tar",
-}
+from paddlex.utils.download import download_and_extract
 
 
-def download_and_extract(name: str, url: str, output_dir: Path) -> None:
-    output_dir.mkdir(parents=True, exist_ok=True)
+PADDLEX_VERSION = "paddle3.0.0"
+PADDLEX_BASE = (
+    f"https://paddle-model-ecology.bj.bcebos.com/paddlex/official_inference_model"
+    f"/{PADDLEX_VERSION}"
+)
+
+# 与 app/ocr_engine.py 默认目录一致；包内包含 inference.yml，适配 PaddleOCR 3.x / PaddleX
+MODEL_PACKS: list[tuple[str, str]] = [
+    ("PP-OCRv4_mobile_det_infer", f"{PADDLEX_BASE}/PP-OCRv4_mobile_det_infer.tar"),
+    ("PP-OCRv4_mobile_rec_infer", f"{PADDLEX_BASE}/PP-OCRv4_mobile_rec_infer.tar"),
+]
+
+
+def download_pack(name: str, url: str, output_dir: Path, *, overwrite: bool) -> None:
     target_dir = output_dir / name
-    if target_dir.exists():
+    if target_dir.exists() and not overwrite:
         print(f"skip existing: {target_dir}")
         return
-
-    with tempfile.TemporaryDirectory() as tmp:
-        tar_path = Path(tmp) / f"{name}.tar"
-        print(f"downloading {name} ...")
-        urllib.request.urlretrieve(url, tar_path)
-        with tarfile.open(tar_path, "r") as tf:
-            tf.extractall(path=tmp)
-        extracted = Path(tmp) / name
-        if not extracted.exists():
-            # 兜底：处理 tar 内目录名不一致情况
-            dirs = [p for p in Path(tmp).iterdir() if p.is_dir()]
-            if not dirs:
-                raise RuntimeError(f"cannot locate extracted directory for {name}")
-            extracted = dirs[0]
-        shutil.move(str(extracted), str(target_dir))
-        print(f"saved: {target_dir}")
+    print(f"downloading {name} ...")
+    download_and_extract(url, str(output_dir), name, overwrite=overwrite)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--output", required=True, help="models output directory")
+    parser = argparse.ArgumentParser(description="下载 PaddleX 推理包（含 inference.yml）到 offline_bundle/models")
+    parser.add_argument("--output", required=True, help="models 输出目录，例如 offline_bundle/models")
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="覆盖已存在的模型目录",
+    )
     args = parser.parse_args()
 
     out = Path(args.output).resolve()
-    for n, u in MODEL_URLS.items():
-        download_and_extract(n, u, out)
-    print("all models downloaded")
+    out.mkdir(parents=True, exist_ok=True)
+    for name, url in MODEL_PACKS:
+        download_pack(name, url, out, overwrite=args.overwrite)
+    print("all model packs ready")
 
 
 if __name__ == "__main__":
     main()
-
