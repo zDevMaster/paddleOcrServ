@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>手写文字识别</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; margin: 16px; background: #f4f6f8; }
+    .top { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; margin-bottom: 12px; }
+    .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+    input[type="text"] { height: 36px; padding: 4px 10px; min-width: 260px; }
+    button { height: 36px; padding: 0 14px; cursor: pointer; border-radius: 8px; border: 1px solid #cbd5e1; background: #fff; }
+    button.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+    button.primary:disabled { opacity: 0.6; cursor: not-allowed; }
+    .wrap { display: grid; gap: 12px; grid-template-columns: 1fr; max-width: 920px; }
+    @media (min-width: 768px) { .wrap { grid-template-columns: 1fr 1fr; } }
+    .panel { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; }
+    .hint { font-size: 13px; color: #64748b; margin: 0 0 8px; }
+    .canvas-wrap {
+      touch-action: none;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      overflow: hidden;
+      background: #fff;
+      max-width: 100%;
+    }
+    canvas { display: block; width: 100%; height: auto; vertical-align: middle; }
+    pre {
+      margin: 0;
+      max-height: 420px;
+      overflow: auto;
+      background: #0b1020;
+      color: #d1e7ff;
+      padding: 12px;
+      border-radius: 8px;
+      font-size: 12px;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    .saved { font-size: 13px; color: #059669; margin-top: 8px; }
+    .err { color: #dc2626; font-size: 13px; margin-top: 8px; }
+    #summary { font-size: 15px; line-height: 1.6; color: #1e293b; min-height: 2em; }
+  </style>
+</head>
+<body>
+  <div class="top">
+    <div class="row">
+      <strong>手写文字识别</strong>
+      <a href="/">返回入口</a>
+    </div>
+    <div class="row">
+      <label>OCR 服务地址</label>
+      <input id="ocrBase" type="text" value="http://127.0.0.1:8000" />
+      <button type="button" id="btnHealth">检查 health</button>
+    </div>
+    <div class="row">
+      <button type="button" id="btnClear">清空画布</button>
+      <button type="button" class="primary" id="btnRecognize">识别并保存</button>
+      <span id="status"></span>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div class="panel">
+      <p class="hint">在下方区域用鼠标或手指书写；写完后点击「识别并保存」。图片与 JSON 会保存到 <code>test/data/HandWrite</code>。</p>
+      <div class="canvas-wrap" id="canvasOuter">
+        <canvas id="pad" width="800" height="400"></canvas>
+      </div>
+      <div class="saved" id="savedInfo"></div>
+      <div class="err" id="errInfo"></div>
+    </div>
+    <div class="panel">
+      <h3 style="margin: 0 0 8px; font-size: 16px;">识别文本</h3>
+      <div id="summary">（尚未识别）</div>
+      <h3 style="margin: 16px 0 8px; font-size: 16px;">完整 JSON</h3>
+      <pre id="jsonBox">等待识别...</pre>
+    </div>
+  </div>
+
+  <script>
+    const pad = document.getElementById("pad");
+    const ctx = pad.getContext("2d");
+    const DPR = Math.min(2, window.devicePixelRatio || 1);
+    const CSS_W = 800;
+    const CSS_H = 400;
+
+    function resizeCanvas() {
+      const outer = document.getElementById("canvasOuter");
+      const maxW = outer.clientWidth || CSS_W;
+      const scale = Math.min(1, maxW / CSS_W);
+      pad.style.width = Math.round(CSS_W * scale) + "px";
+      pad.style.height = Math.round(CSS_H * scale) + "px";
+    }
+    resizeCanvas();
+    window.addEventListener("resize", resizeCanvas);
+
+    pad.width = Math.round(CSS_W * DPR);
+    pad.height = Math.round(CSS_H * DPR);
+    ctx.scale(DPR, DPR);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, CSS_W, CSS_H);
+    ctx.strokeStyle = "#111827";
+    ctx.lineWidth = 3;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+
+    let drawing = false;
+    let lastX = 0;
+    let lastY = 0;
+
+    function pos(ev) {
+      const r = pad.getBoundingClientRect();
+      const scaleX = CSS_W / r.width;
+      const scaleY = CSS_H / r.height;
+      let clientX;
+      let clientY;
+      if (ev.touches && ev.touches.length) {
+        clientX = ev.touches[0].clientX;
+        clientY = ev.touches[0].clientY;
+      } else {
+        clientX = ev.clientX;
+        clientY = ev.clientY;
+      }
+      return {
+        x: (clientX - r.left) * scaleX,
+        y: (clientY - r.top) * scaleY,
+      };
+    }
+
+    function start(ev) {
+      ev.preventDefault();
+      drawing = true;
+      const p = pos(ev);
+      lastX = p.x;
+      lastY = p.y;
+    }
+
+    function move(ev) {
+      if (!drawing) return;
+      ev.preventDefault();
+      const p = pos(ev);
+      ctx.beginPath();
+      ctx.moveTo(lastX, lastY);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+      lastX = p.x;
+      lastY = p.y;
+    }
+
+    function end(ev) {
+      if (ev && ev.cancelable) ev.preventDefault();
+      drawing = false;
+    }
+
+    pad.addEventListener("mousedown", start);
+    pad.addEventListener("mousemove", move);
+    pad.addEventListener("mouseup", end);
+    pad.addEventListener("mouseleave", end);
+
+    pad.addEventListener("touchstart", start, { passive: false });
+    pad.addEventListener("touchmove", move, { passive: false });
+    pad.addEventListener("touchend", end);
+    pad.addEventListener("touchcancel", end);
+
+    document.getElementById("btnClear").addEventListener("click", () => {
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, CSS_W, CSS_H);
+      ctx.strokeStyle = "#111827";
+      document.getElementById("errInfo").textContent = "";
+      document.getElementById("savedInfo").textContent = "";
+    });
+
+    document.getElementById("btnHealth").addEventListener("click", async () => {
+      const base = document.getElementById("ocrBase").value.trim();
+      const r = await fetch(`/api/health?ocrBase=${encodeURIComponent(base)}`);
+      const d = await r.json();
+      alert(JSON.stringify(d, null, 2));
+    });
+
+    function extractText(payload) {
+      const ocr = payload && payload.data;
+      if (!ocr) return "";
+      const inner = ocr.data;
+      if (!inner) return "";
+      const t = inner.text;
+      if (t != null && String(t).trim()) return String(t).trim();
+      const f = inner.fields;
+      if (f && f["全文"] && f["全文"].value != null) return String(f["全文"].value).trim();
+      return "";
+    }
+
+    document.getElementById("btnRecognize").addEventListener("click", async () => {
+      const status = document.getElementById("status");
+      const errEl = document.getElementById("errInfo");
+      const savedEl = document.getElementById("savedInfo");
+      const jsonBox = document.getElementById("jsonBox");
+      const summary = document.getElementById("summary");
+      errEl.textContent = "";
+      savedEl.textContent = "";
+      status.textContent = "识别中…";
+      const btn = document.getElementById("btnRecognize");
+      btn.disabled = true;
+
+      try {
+        const blob = await new Promise((resolve, reject) => {
+          pad.toBlob((b) => (b ? resolve(b) : reject(new Error("toBlob failed"))), "image/png");
+        });
+        const fd = new FormData();
+        fd.append("file", blob, "handwrite.png");
+        fd.append("ocrBase", document.getElementById("ocrBase").value.trim());
+
+        const r = await fetch("/api/handwrite/save", { method: "POST", body: fd });
+        const text = await r.text();
+        let data;
+        try {
+          data = JSON.parse(text);
+        } catch {
+          throw new Error(text || `HTTP ${r.status}`);
+        }
+        if (!r.ok) {
+          throw new Error(data.detail || text || `HTTP ${r.status}`);
+        }
+
+        jsonBox.textContent = JSON.stringify(data, null, 2);
+        summary.textContent = extractText(data) || "（无文本）";
+        savedEl.textContent =
+          "已保存：" + (data.savedImage || "") + "  |  " + (data.savedJson || "");
+        status.textContent = "完成";
+      } catch (e) {
+        errEl.textContent = String(e.message || e);
+        jsonBox.textContent = "";
+        summary.textContent = "（识别失败）";
+        status.textContent = "";
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

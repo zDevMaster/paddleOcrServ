@@ -34,7 +34,12 @@ def get_ocr_engine() -> PaddleOCR:
     )
     _assert_model_dirs(det_model_dir, rec_model_dir)
     return PaddleOCR(
-        use_angle_cls=False,
+        # 使用 PaddleX 推理包（inference.yml）时，textline orientation 由 PaddleOCR 参数控制；
+        # 这里直接显式关闭，避免额外 cls 相关模型加载。
+        # 离线稳定性：关闭文档方向分类/版面矫正/行方向分类，避免在初始化阶段加载额外官方模型。
+        use_doc_orientation_classify=False,
+        use_doc_unwarping=False,
+        use_textline_orientation=False,
         text_detection_model_name="PP-OCRv4_mobile_det",
         text_detection_model_dir=det_model_dir,
         text_recognition_model_name="PP-OCRv4_mobile_rec",
