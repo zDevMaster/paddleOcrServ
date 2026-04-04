@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections.abc import Iterable
 
 from app.models import DocumentType
@@ -22,15 +23,29 @@ def _line_texts(lines: list[dict]) -> list[str]:
 _NOISE_HANDWRITING = re.compile(r"^[?？。，、·…\s]+$")
 
 
-def _is_cjk_unified_or_extension_a(ch: str) -> bool:
-    """CJK 统一表意文字 + 扩展 A（常见姓名生僻字），用于手写签名仅保留中文。"""
-    o = ord(ch)
-    return 0x3400 <= o <= 0x4DBF or 0x4E00 <= o <= 0x9FFF
+def _strip_latin_letters_and_symbols(s: str) -> str:
+    """手写签名：去掉拉丁字母（含全角英文）及各类标点、符号、空白分隔符；保留汉字（含扩展 B/C 等 Lo 类）、数字等。
 
-
-def _han_chars_only(s: str) -> str:
-    """去掉英文、数字、标点及其他符号，仅保留汉字（签名场景）。"""
-    return "".join(ch for ch in s if _is_cjk_unified_or_extension_a(ch))
+    采用「删除拉丁与符号」而非「仅保留 BMP 汉字码段」，避免生僻字、扩展区汉字被误删导致「两字只出一字」。
+    """
+    out: list[str] = []
+    for ch in s:
+        o = ord(ch)
+        # ASCII 英文
+        if "a" <= ch <= "z" or "A" <= ch <= "Z":
+            continue
+        # 全角英文 A-Za-z
+        if 0xFF21 <= o <= 0xFF3A or 0xFF41 <= o <= 0xFF5A:
+            continue
+        cat = unicodedata.category(ch)
+        # 标点、符号、各类空白/换行分隔
+        if cat[0] in "PSZ":
+            continue
+        # Lu/Ll/Lt/Lm：拉丁、西里尔等字母表字母（汉字为 Lo，不会误删）
+        if cat in ("Lu", "Ll", "Lt", "Lm"):
+            continue
+        out.append(ch)
+    return "".join(out)
 
 
 def _is_handwriting_noise(text: str) -> bool:
@@ -68,7 +83,7 @@ def extract_handwriting(lines: list[dict]) -> tuple[dict, dict, list[str], str]:
     scores: list[float] = []
     for x in lines:
         raw = str(x.get("text", "")).strip()
-        t = _han_chars_only(raw)
+        t = _strip_latin_letters_and_symbols(raw)
         if not t or _is_handwriting_noise(t):
             continue
         texts.append(t)
