@@ -77,7 +77,7 @@
 ```powershell
 cd E:\paddleOcr
 .\.venv\Scripts\activate
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 5
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1
 ```
 
 **Linux（可多进程生产）**
@@ -100,7 +100,7 @@ python -m gunicorn -c gunicorn_conf.py app.main:app
 
 ## 8. 并发与稳定建议
 - 单请求内部保持串行，避免在请求内并发 OCR。
-- 调整 `OCR_WORKERS`：三个启动脚本默认 **5**（`startupv5s.bat` 使用 v5 server 大模型时若出现子进程退出，可改为调低 `OCR_WORKERS` 或换 `startupv5m.bat` / `startupV4m.bat`）。也可在运行前 `set OCR_WORKERS=N` 覆盖脚本内的默认值。
+- 调整 `OCR_WORKERS`：Windows 下启动脚本**默认 1**（避免 uvicorn 多进程在 Windows 上出现 `OSError: WinError 10022`；内存充足且多 worker 在你的环境可稳定运行时，可 `set OCR_WORKERS=N`）。`startupv5s.bat` 大模型若出现子进程退出，可保持 1 或换 `startupv5m.bat` / `startupV4m.bat`。
 - 生产建议加请求日志（带 `traceId`）与图片留档策略（按合规要求存储）。
 
 ## 9. 内网离线部署准备（外网机器先打包）
@@ -234,7 +234,7 @@ pip install --no-index --find-links .\offline_bundle\paddle --find-links .\offli
 
 ## 13. 启动服务指令（Windows）
 
-根目录提供 **三种** 启动脚本，均使用 **uvicorn 多进程**，并默认设置 `PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK`、`FLAGS_use_mkldnn` 等；**默认 `OCR_WORKERS=5`**（可按机器内存用环境变量覆盖）。
+根目录提供 **三种** 启动脚本，均使用 **uvicorn**，并默认设置 `PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK`、`FLAGS_use_mkldnn` 等；**Windows 默认 `OCR_WORKERS=1`**（启动前 `set OCR_WORKERS=N` 可覆盖；多 worker 在 Windows 上可能触发套接字错误，见 [服务器部署.md](服务器部署.md) 常见问题）。
 
 | 脚本 | 检测模型 | 识别模型 | 说明 |
 |------|-----------|-----------|------|
@@ -250,10 +250,12 @@ pip install --no-index --find-links .\offline_bundle\paddle --find-links .\offli
 可选环境变量（在运行前于同一 cmd 窗口 `set`，可覆盖脚本内默认值）：
 
 ```bat
-set OCR_WORKERS=3
+set OCR_WORKERS=2
 set OCR_PORT=8000
 set OCR_HOST=0.0.0.0
 ```
+
+在 Windows 上 **`OCR_WORKERS` 大于 1** 可能导致 uvicorn 报错 `WinError 10022`，默认请用 **1**；仅当在你环境中实测多 worker 可稳定监听时再提高。
 
 更细的步骤与任务计划见 [服务器部署.md](服务器部署.md) 第 5～6 节。
 

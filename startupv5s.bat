@@ -4,7 +4,7 @@ setlocal EnableExtensions
 
 
 
-REM PP-OCRv5 server 检测 + 识别（精度高、内存大）；默认 5 workers
+REM PP-OCRv5 server 检测 + 识别（精度高、内存大）；Windows 默认 1 worker（见 OCR_WORKERS 说明）
 
 REM 若日志出现 Child process died，请降低 OCR_WORKERS 或换 startupv5m.bat / startupV4m.bat
 
@@ -20,7 +20,8 @@ set OCR_DET_MODEL_NAME=PP-OCRv5_server_det
 
 set OCR_REC_MODEL_NAME=PP-OCRv5_server_rec
 
-set OCR_WORKERS=5
+REM Windows：uvicorn 多 worker 可能 WinError 10022；未设置时默认 1。大模型多 worker 亦易 OOM。
+if not defined OCR_WORKERS set OCR_WORKERS=1
 
 
 

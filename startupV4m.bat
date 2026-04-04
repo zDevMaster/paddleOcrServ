@@ -4,7 +4,7 @@ setlocal EnableExtensions
 
 
 
-REM PP-OCRv4 mobile 检测 + 识别；默认 5 workers（模型较小，多并发相对安全）
+REM PP-OCRv4 mobile 检测 + 识别；Windows 默认 1 worker（见脚本内 OCR_WORKERS 说明）
 
 REM 用法：直接运行为前台；可加参数 bg / background 后台启动
 
@@ -18,7 +18,8 @@ set OCR_DET_MODEL_NAME=PP-OCRv4_mobile_det
 
 set OCR_REC_MODEL_NAME=PP-OCRv4_mobile_rec
 
-set OCR_WORKERS=5
+REM Windows：uvicorn --workers>1 时子进程继承监听套接字可能 OSError WinError 10022；未设置环境变量时默认 1。需多进程可先 set OCR_WORKERS=N。
+if not defined OCR_WORKERS set OCR_WORKERS=1
 
 
 
