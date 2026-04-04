@@ -225,6 +225,13 @@ pip install --no-index --find-links .\offline_bundle\paddle --find-links .\offli
 
 代价：**模型更大、CPU 推理更慢、内存更高**，无 GPU 时并发与延迟需自行压测。若环境算力很紧、更看重吞吐，可改为 **PP-OCRv5_mobile** 或 **PP-OCRv4_mobile** 对应推理包：同步更新 `download_models.py` 中的 tar 名与解压目录、`ocr_engine.py` 中的 `text_*_model_name` 与默认路径，并做一轮回归测试。
 
+### 12.3 手写中文签名（接口行为与模型选型参考）
+
+- **`/v1/ocr/general`** 与 **`/v1/ocr/document/handwriting`**：在 `extract_handwriting` 中对识别结果 **仅保留汉字**（CJK 统一表意文字及扩展 A 段，去除英文、数字、标点及其他符号），`data.text` 与 `fields` 均为过滤后内容。
+- **速度**：`PP-OCRv4_mobile` 识别包更小，CPU 上通常快于 v5 server，适合重吞吐场景（见根目录 `startupV4m.bat`）。
+- **更强通用手写**：PaddleOCR **PP-OCRv5** 在官方说明中强化了多场景手写能力，可与 v4 mobile 对比实测后选型。
+- **专用「签名」模型**：公开生态里单独针对「连笔签名」的即用模型较少；常见路径是用手写汉字数据（如 **CASIA-HWDB** 系列）在通用识别模型上 **微调**，或沿用通用 OCR + 业务侧汉字过滤（即本服务当前策略）。
+
 ## 13. 启动服务指令（Windows）
 
 根目录提供 **三种** 启动脚本，均使用 **uvicorn 多进程**，并默认设置 `PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK`、`FLAGS_use_mkldnn` 等；**默认 `OCR_WORKERS=5`**（可按机器内存用环境变量覆盖）。

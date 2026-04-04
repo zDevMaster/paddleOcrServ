@@ -19,6 +19,32 @@ def _line_texts(lines: list[dict]) -> list[str]:
     return [str(x.get("text", "")).strip() for x in lines if str(x.get("text", "")).strip()]
 
 
+_NOISE_HANDWRITING = re.compile(r"^[?？。，、·…\s]+$")
+
+
+def _is_cjk_unified_or_extension_a(ch: str) -> bool:
+    """CJK 统一表意文字 + 扩展 A（常见姓名生僻字），用于手写签名仅保留中文。"""
+    o = ord(ch)
+    return 0x3400 <= o <= 0x4DBF or 0x4E00 <= o <= 0x9FFF
+
+
+def _han_chars_only(s: str) -> str:
+    """去掉英文、数字、标点及其他符号，仅保留汉字（签名场景）。"""
+    return "".join(ch for ch in s if _is_cjk_unified_or_extension_a(ch))
+
+
+def _is_handwriting_noise(text: str) -> bool:
+    """滤掉检测/识别产生的孤立标点或噪声（如单独一行「?」）。"""
+    t = text.strip()
+    if not t:
+        return True
+    if len(t) == 1 and t in "?？。，、·+＋*…":
+        return True
+    if _NOISE_HANDWRITING.fullmatch(t):
+        return True
+    return False
+
+
 def _pick_after_anchor(lines: list[str], anchors: Iterable[str]) -> tuple[str, str]:
     for idx, line in enumerate(lines):
         for anchor in anchors:
@@ -38,13 +64,25 @@ def _field(value: str, confidence: float, source: str) -> dict:
 
 
 def extract_handwriting(lines: list[dict]) -> tuple[dict, dict, list[str], str]:
-    texts = _line_texts(lines)
-    scores = [float(x.get("score", 0.0)) for x in lines] or [0.0]
-    full_text = "\n".join(texts)
+    texts: list[str] = []
+    scores: list[float] = []
+    for x in lines:
+        raw = str(x.get("text", "")).strip()
+        t = _han_chars_only(raw)
+        if not t or _is_handwriting_noise(t):
+            continue
+        texts.append(t)
+        scores.append(float(x.get("score", 0.0)))
+    if not scores:
+        scores = [0.0]
+    # 手写签名多为单行连写，用无分隔拼接，避免出现「张\n三」或尾部「\n?」类噪声
+    full_text = "".join(texts)
+    mean_score = float(sum(scores) / len(scores)) if texts else 0.0
+    rounded = round(mean_score, 4)
     fields = {
-        "全文": _field(full_text, float(sum(scores) / len(scores)), "ocr_concat"),
-        "行文本": _field(texts, 0.95 if texts else 0.0, "ocr_lines"),
-        "置信度": _field(round(float(sum(scores) / len(scores)), 4), 1.0 if texts else 0.0, "ocr_mean"),
+        "全文": _field(full_text, mean_score, "ocr_concat"),
+        "行文本": _field(texts, mean_score, "ocr_lines"),
+        "置信度": _field(rounded, mean_score, "ocr_mean"),
     }
     validation = {"rules": {"has_text": bool(texts)}, "warnings": []}
     missing = [k for k, v in fields.items() if not v["value"]]
