@@ -3,7 +3,8 @@ setlocal EnableExtensions
 
 cd /d "%~dp0"
 
-if not defined TEST_SITE_HOST set TEST_SITE_HOST=127.0.0.1
+REM 默认 0.0.0.0：本机可用 127.0.0.1，局域网其它电脑可用本机 IP（如 192.168.x.x）。仅本机可设 TEST_SITE_HOST=127.0.0.1
+if not defined TEST_SITE_HOST set TEST_SITE_HOST=0.0.0.0
 if not defined TEST_SITE_PORT set TEST_SITE_PORT=9000
 
 if exist "..\.venv\Scripts\python.exe" (
@@ -16,5 +17,5 @@ echo [TEST-SITE] Python: %PYEXE%
 echo [TEST-SITE] URL:    http://%TEST_SITE_HOST%:%TEST_SITE_PORT%
 echo.
 
-"%PYEXE%" -m uvicorn test_site:app --host %TEST_SITE_HOST% --port %TEST_SITE_PORT% --reload
+"%PYEXE%" -m uvicorn test_site:app --host %TEST_SITE_HOST% --port %TEST_SITE_PORT% --reload --log-config "%~dp0..\uvicorn_log_config.json"
 
