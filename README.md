@@ -143,7 +143,7 @@ cd E:\paddleOcr
 .\scripts\prepare_offline_assets.ps1 -PythonExe python -PaddleVersion 3.3.1
 ```
 
-执行后会把 **锁定清单中的全部 wheel**（含 `paddlepaddle` 及 OCR 依赖）、**Paddle CPU 栈（写入 `offline_bundle/paddle`）**、PaddleOCR 模型下载到 `offline_bundle` 对应目录，并运行 **`scripts/verify_offline_bundle.py`** 自检。内网安装命令见 [服务器部署.md](服务器部署.md) 第 3 节；拷贝前也可单独执行 `python scripts/verify_offline_bundle.py`。
+执行后会把 **锁定清单中的全部 wheel**（含 `paddlepaddle` 及 OCR 依赖）、**Paddle CPU 栈（写入 `offline_bundle/paddle`）**、PaddleOCR 模型下载到 `offline_bundle` 对应目录，并运行 **`scripts/verify_offline_bundle.py`** 自检。内网安装命令见 [服务器部署.md](服务器部署.md) **第 4 节**；离线包说明与拷贝前自检见 **第 3 节**；拷贝前也可单独执行 `python scripts/verify_offline_bundle.py`。
 
 ### 10.1 固定 Python 与依赖版本
 建议先生成锁定文件，避免内网安装时版本漂移：
@@ -239,13 +239,13 @@ set OCR_PORT=8000
 set OCR_HOST=0.0.0.0
 ```
 
-详细说明见 [服务器部署.md](服务器部署.md) 第 4 节。
+详细说明见 [服务器部署.md](服务器部署.md) 第 5 节。
 
 ## 14. 配置开机自动启动（Windows Server 2016 / 10 / 11）
 
 使用任务计划程序，在**系统启动时**执行项目根目录的 **`startup.bat`**（程序填 `cmd.exe`，参数 `/c "E:\paddleOcr\startup.bat"`，“起始于”填 `E:\paddleOcr`）。
 
-分步截图级说明与验证方法见 **[服务器部署.md](服务器部署.md) 第 5 节**。
+分步截图级说明与验证方法见 **[服务器部署.md](服务器部署.md) 第 6 节**。
 
 ## 15. 离线部署校验建议
 - 执行 `GET /health`，确认服务可用
