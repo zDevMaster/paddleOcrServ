@@ -34,6 +34,7 @@
 
 - **身份证、行驶证、驾驶证、手写等证件/业务识别**：请先将**图片文件读入字节**，再 **`Convert.ToBase64String`**，以 **`application/json`** 提交 `{ "imageBase64": "..." }` 到对应路径（**不要**带 `data:image/...;base64,` 前缀，与微服务 `ImageJsonRequest` 一致）。
 - **亦可**使用 **`multipart/form-data`** 直接上传文件字段 `file`（见下文 `PostDocumentByFile` / `PostGeneralByFile`），与 JSON 二选一即可。
+- **与本仓库 `test` 测试站的关系**：`test/test_site.py` 在调用 OCR 微服务时（`/api/recognize`、`/api/batch/run`、`/api/handwriting/submit` 等转发路径）使用的是 **`multipart` 上传文件**，**不是** Base64。微服务 **两种请求都支持**，与 C# 选用 Base64 或 multipart **效果等价**，仅调用方式不同。
 - 公开方法为**同步**（无 `async`/`await`）；内部可用 `HttpClient.Send`（**.NET 5+**）或 `SendAsync(...).GetAwaiter().GetResult()`（**.NET Framework**）。
 - **`OcrHttpClient`**：构造时若传入**系统已注册/单例的 `HttpClient`**（如 DI），则**直接使用**；若未传入，则类内使用**进程级单例** `HttpClient`（懒创建、全进程复用），**无需**在 `Application_Start` 里单独初始化客户端类型本身。
 
