@@ -227,7 +227,7 @@ pip install --no-index --find-links .\offline_bundle\paddle --find-links .\offli
 
 ### 12.3 手写中文签名（接口行为与模型选型参考）
 
-- **`/v1/ocr/general`** 与 **`/v1/ocr/document/handwriting`**：在 `extract_handwriting` 中 **去除拉丁字母（含全角英文）及标点、符号、空白**，保留汉字（Unicode `Lo`，含扩展 B/C 等）及数字等；`data.text` 与 `fields` 均为过滤后内容。
+- **`/v1/ocr/general`** 与 **`/v1/ocr/document/handwriting`**：在 `extract_handwriting` 中 **去除拉丁字母（含全角英文）、数字（含全角与 Unicode 数字类）、标点、符号、空白**，保留汉字（Unicode `Lo`，含扩展 B/C 等）；`data.text` 与 `fields` 均为过滤后内容。
 - **速度**：`PP-OCRv4_mobile` 识别包更小，CPU 上通常快于 v5 server，适合重吞吐场景（见根目录 `startupV4m.bat`）。
 - **更强通用手写**：PaddleOCR **PP-OCRv5** 在官方说明中强化了多场景手写能力，可与 v4 mobile 对比实测后选型。
 - **专用「签名」模型**：公开生态里单独针对「连笔签名」的即用模型较少；常见路径是用手写汉字数据（如 **CASIA-HWDB** 系列）在通用识别模型上 **微调**，或沿用通用 OCR + 业务侧汉字过滤（即本服务当前策略）。

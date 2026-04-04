@@ -24,9 +24,9 @@ _NOISE_HANDWRITING = re.compile(r"^[?？。，、·…\s]+$")
 
 
 def _strip_latin_letters_and_symbols(s: str) -> str:
-    """手写签名：去掉拉丁字母（含全角英文）及各类标点、符号、空白分隔符；保留汉字（含扩展 B/C 等 Lo 类）、数字等。
+    """手写签名：去掉拉丁字母（含全角英文）、数字、各类标点、符号、空白分隔符；保留汉字（含扩展 B/C 等 Lo 类）。
 
-    采用「删除拉丁与符号」而非「仅保留 BMP 汉字码段」，避免生僻字、扩展区汉字被误删导致「两字只出一字」。
+    采用「删除拉丁、数字与符号」而非「仅保留 BMP 汉字码段」，避免生僻字、扩展区汉字被误删导致「两字只出一字」。
     """
     out: list[str] = []
     for ch in s:
@@ -34,12 +34,21 @@ def _strip_latin_letters_and_symbols(s: str) -> str:
         # ASCII 英文
         if "a" <= ch <= "z" or "A" <= ch <= "Z":
             continue
+        # ASCII 数字
+        if "0" <= ch <= "9":
+            continue
         # 全角英文 A-Za-z
         if 0xFF21 <= o <= 0xFF3A or 0xFF41 <= o <= 0xFF5A:
+            continue
+        # 全角数字 ０-９
+        if 0xFF10 <= o <= 0xFF19:
             continue
         cat = unicodedata.category(ch)
         # 标点、符号、各类空白/换行分隔
         if cat[0] in "PSZ":
+            continue
+        # Nd / Nl / No：各类数字
+        if cat[0] == "N":
             continue
         # Lu/Ll/Lt/Lm：拉丁、西里尔等字母表字母（汉字为 Lo，不会误删）
         if cat in ("Lu", "Ll", "Lt", "Lm"):
