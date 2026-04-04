@@ -26,6 +26,53 @@ DOC_TO_DIR = {
 app = FastAPI(title="OCR Batch Test Site", version="2.0.0")
 
 
+async def _require_ocr_service(ocr_base: str) -> None:
+    """调用 OCR 接口前先探测 /health；未启动则返回 503 与明确中文说明。"""
+    base = (ocr_base or DEFAULT_OCR_BASE).rstrip("/")
+    url = f"{base}/health"
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(url)
+    except httpx.ConnectError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"无法连接 OCR 微服务（{base}）。请先在项目根目录执行 startup.bat（或 uvicorn）"
+                f"启动服务后再试。连接错误: {exc}"
+            ),
+        ) from exc
+    except httpx.TimeoutException as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"连接 OCR 微服务超时（{url}）。请确认 {base} 已启动且未被防火墙拦截。",
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"检查 OCR 微服务时出错: {exc}",
+        ) from exc
+
+    if resp.status_code != 200:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"OCR 微服务未就绪：GET /health 返回 HTTP {resp.status_code}。"
+                f"请确认微服务已启动（默认 http://127.0.0.1:8000）。"
+            ),
+        )
+    try:
+        body = resp.json()
+        if isinstance(body, dict) and body.get("success") is False:
+            raise HTTPException(
+                status_code=503,
+                detail=f"OCR 微服务 /health 未返回成功: {body}",
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+
+
 class BatchRequest(BaseModel):
     docType: str = Field(..., description="idcard/vehicle_license/driver_license/handwriting")
     batchSize: int = Field(10, description="5-100")
@@ -105,11 +152,13 @@ async def api_handwriting_submit(
 ):
     """画布手写签名：保存为 test/data/HandWrite/{uuid}.png，调用 /v1/ocr/general，写回同名 .json。"""
     ocr_base = (ocrBase or DEFAULT_OCR_BASE).rstrip("/")
+    content = await file.read()
+    await _require_ocr_service(ocr_base)
+
     folder = DATA_DIR / "HandWrite"
     folder.mkdir(parents=True, exist_ok=True)
     guid = uuid.uuid4().hex
     img_path = folder / f"{guid}.png"
-    content = await file.read()
     img_path.write_bytes(content)
 
     target = f"{ocr_base}/v1/ocr/general"
@@ -171,6 +220,8 @@ async def api_recognize(
     if not doc_type:
         raise HTTPException(status_code=400, detail="docType is required")
 
+    await _require_ocr_service(ocr_base)
+
     if doc_type == "handwriting":
         target = f"{ocr_base}/v1/ocr/general"
     elif doc_type in {"idcard", "vehicle_license", "driver_license"}:
@@ -197,6 +248,8 @@ async def api_batch_run(req: BatchRequest):
     doc_type = req.docType.strip()
     batch_size = max(5, min(100, int(req.batchSize)))
     ocr_base = req.ocrBase.rstrip("/")
+
+    await _require_ocr_service(ocr_base)
 
     folder = _doc_folder(doc_type)
     images = _image_files(folder)

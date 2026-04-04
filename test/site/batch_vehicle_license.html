@@ -68,11 +68,20 @@
     let currentPage = 1, currentIndex = 0, lastData = null;
     const $ = (id)=>document.getElementById(id);
     async function health(){ const base=$("ocrBase").value.trim(); const r=await fetch(`/api/health?ocrBase=${encodeURIComponent(base)}`); alert(JSON.stringify(await r.json())); }
+    function formatApiErr(d){
+      if(!d||d.detail==null) return "";
+      const x=d.detail;
+      if(typeof x==="string") return x;
+      if(Array.isArray(x)) return x.map(e=>e.msg!=null?e.msg:JSON.stringify(e)).join(" ");
+      return String(x);
+    }
     async function runBatch(){
       $("runInfo").textContent="执行中...";
       const payload={docType:DOC_TYPE,batchSize:parseInt($("batchSize").value,10),ocrBase:$("ocrBase").value.trim()};
       const r=await fetch("/api/batch/run",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
-      const d=await r.json();
+      let d;
+      try{ d=await r.json(); } catch { $("runInfo").textContent="批量失败: HTTP "+r.status; return; }
+      if(!r.ok){ $("runInfo").textContent="批量失败: "+(formatApiErr(d)||r.status); return; }
       $("runInfo").textContent=`已处理 ${d.processedCount}，失败 ${d.failedCount}，剩余 ${d.pendingAfterRun}`;
       await loadPage(1);
     }
