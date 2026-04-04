@@ -1,7 +1,11 @@
 ﻿from __future__ import annotations
 
+import asyncio
 import json
-import uuid
+import logging
+import os
+import sys
+import time
 from pathlib import Path
 
 import httpx
@@ -25,6 +29,52 @@ DOC_TO_DIR = {
 
 app = FastAPI(title="OCR Batch Test Site", version="2.0.0")
 
+log = logging.getLogger("test_site")
+
+
+def _ocr_upstream_timeout() -> httpx.Timeout:
+    """调用 OCR 微服务：首请求可能加载模型（可达数分钟），默认 600s。
+
+    环境变量 ``OCR_UPSTREAM_TIMEOUT`` 可改为更大（秒），例如 ``1200``。
+    """
+    sec = float(os.getenv("OCR_UPSTREAM_TIMEOUT", "600"))
+    if sec < 30:
+        sec = 30.0
+    return httpx.Timeout(sec, connect=min(60.0, sec))
+
+
+def _ocr_request_error_detail(exc: BaseException, target: str) -> str:
+    """把 httpx 异常转成对用户可读的中文说明（含常见首包超时）。"""
+    name = type(exc).__name__
+    msg = str(exc)
+    extra = ""
+    if "ReadTimeout" in name or "read timed out" in msg.lower():
+        extra = (
+            "常见原因：OCR 正在首次加载模型（CPU 上可能需数分钟），测试站等待超时。"
+            "请在运行测试站的终端执行 set OCR_UPSTREAM_TIMEOUT=1200 后重启测试站，"
+            "或在 OCR 服务器本机浏览器先访问一次 /v1/ocr/general 完成预热。"
+        )
+    elif "ReadError" in name or "RemoteProtocolError" in name:
+        extra = (
+            "常见原因：读响应时连接被对端关闭——多见于 OCR 推理中进程崩溃（如内存不足 OOM）、"
+            "worker 被系统终止、或推理过久导致连接异常。请查看运行启动脚本（如 startupv5s.bat）的窗口是否有 Python 报错；"
+            "可尝试启动前 set OCR_WORKERS=1 降低内存占用，并在本机先单独调用一次 /v1/ocr/general 完成预热。"
+            "测试站会对 ReadError 自动重试（次数由 OCR_POST_RETRIES 控制，默认 2 次重试）。"
+        )
+    elif "ConnectTimeout" in name or "ConnectError" in name:
+        extra = "无法建立到 OCR 的 TCP 连接，请确认 OCR 进程仍存活且防火墙放行。"
+    return (
+        f"调用 OCR 识别接口失败（{name}）。{extra} "
+        f"{_ocr_upstream_network_hint()} 目标: {target}。技术信息: {msg}"
+    )
+
+
+def _ocr_upstream_network_hint() -> str:
+    return (
+        "若测试站与 OCR 在同一台机器上，请将「OCR 服务地址」设为 http://127.0.0.1:8000，"
+        "不要填本机局域网 IP（否则可能连接失败或超时）。"
+    )
+
 
 async def _require_ocr_service(ocr_base: str) -> None:
     """调用 OCR 接口前先探测 /health；未启动则返回 503 与明确中文说明。"""
@@ -33,23 +83,26 @@ async def _require_ocr_service(ocr_base: str) -> None:
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.get(url)
-    except httpx.ConnectError as exc:
+    except httpx.RequestError as exc:
+        # 含 ConnectError、网络不可达、DNS 等（不同版本 httpx/httpcore 异常类型不一）
         raise HTTPException(
             status_code=503,
             detail=(
-                f"无法连接 OCR 微服务（{base}）。请先在项目根目录执行 startup.bat（或 uvicorn）"
-                f"启动服务后再试。连接错误: {exc}"
+                "OCR 微服务未启动或不可达：无法连接到 "
+                f"{url}。请先在项目根目录执行启动脚本（如 startupv5s.bat），或使用 "
+                "`python -m uvicorn app.main:app --host 0.0.0.0 --port 8000` "
+                f"后再试。技术信息: {exc!s}"
             ),
         ) from exc
-    except httpx.TimeoutException as exc:
+    except (ConnectionError, OSError) as exc:
         raise HTTPException(
             status_code=503,
-            detail=f"连接 OCR 微服务超时（{url}）。请确认 {base} 已启动且未被防火墙拦截。",
+            detail=f"OCR 微服务未启动或网络异常：{exc!s}。请确认 {base} 上 OCR 进程已监听。",
         ) from exc
     except Exception as exc:
         raise HTTPException(
             status_code=503,
-            detail=f"检查 OCR 微服务时出错: {exc}",
+            detail=f"检查 OCR 微服务时出错（{url}）：{exc!s}",
         ) from exc
 
     if resp.status_code != 200:
@@ -90,14 +143,27 @@ def _doc_folder(doc_type: str) -> Path:
     return folder
 
 
-def _image_files(folder: Path) -> list[Path]:
-    files = [p for p in folder.iterdir() if p.is_file() and p.suffix.lower() in IMAGE_EXTS]
-    files.sort(key=lambda p: p.name.lower())
-    return files
-
-
 def _json_path_for(img_path: Path) -> Path:
     return img_path.with_suffix(".json")
+
+
+def _image_creation_time(p: Path) -> float:
+    """图片文件「创建时间」用于列表倒序（新在前）。
+
+    Windows：`st_ctime` 为创建时间。
+    Linux/macOS：优先 `st_birthtime`（若有），否则退回 `st_mtime`。
+    """
+    st = p.stat()
+    if sys.platform == "win32":
+        return float(st.st_ctime)
+    return float(getattr(st, "st_birthtime", st.st_mtime))
+
+
+def _image_files(folder: Path) -> list[Path]:
+    files = [p for p in folder.iterdir() if p.is_file() and p.suffix.lower() in IMAGE_EXTS]
+    # 按图片创建时间倒序；同名 secondary 保证稳定
+    files.sort(key=lambda p: (-_image_creation_time(p), p.name.lower()))
+    return files
 
 
 def _page_path(name: str) -> Path:
@@ -118,6 +184,34 @@ def _html_page(name: str) -> HTMLResponse:
 
 def _image_url(doc_type: str, filename: str) -> str:
     return f"/api/image/{doc_type}/{filename}"
+
+
+def _ocr_upstream_error_detail(resp: httpx.Response) -> str:
+    """解析 OCR 微服务返回的 JSON（FastAPI detail）或原文，供测试页展示真实原因。"""
+    code = resp.status_code
+    text = (resp.text or "").strip()
+    if not text:
+        return f"OCR 返回 HTTP {code}（无响应体）"
+    try:
+        data = resp.json()
+        if isinstance(data, dict):
+            d = data.get("detail")
+            if isinstance(d, str):
+                return f"OCR 返回 HTTP {code}: {d}"
+            if isinstance(d, list):
+                parts = []
+                for item in d:
+                    if isinstance(item, dict) and item.get("msg") is not None:
+                        parts.append(str(item["msg"]))
+                    else:
+                        parts.append(str(item))
+                return f"OCR 返回 HTTP {code}: " + "; ".join(parts)
+            if data.get("message") is not None:
+                return f"OCR 返回 HTTP {code}: {data['message']}"
+    except Exception:
+        pass
+    snippet = text[:2000]
+    return f"OCR 返回 HTTP {code}: {snippet}"
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -150,27 +244,75 @@ async def api_handwriting_submit(
     file: UploadFile = File(...),
     ocrBase: str = Form(DEFAULT_OCR_BASE),
 ):
-    """画布手写签名：保存为 test/data/HandWrite/{uuid}.png，调用 /v1/ocr/general，写回同名 .json。"""
+    """画布手写签名：保存为 test/data/HandWrite/{纳秒tick}.png，调用 /v1/ocr/general，写回同名 .json。"""
     ocr_base = (ocrBase or DEFAULT_OCR_BASE).rstrip("/")
     content = await file.read()
     await _require_ocr_service(ocr_base)
 
     folder = DATA_DIR / "HandWrite"
     folder.mkdir(parents=True, exist_ok=True)
-    guid = uuid.uuid4().hex
-    img_path = folder / f"{guid}.png"
+    tick = time.time_ns()
+    stem = f"{tick:019d}"
+    img_path = folder / f"{stem}.png"
     img_path.write_bytes(content)
 
     target = f"{ocr_base}/v1/ocr/general"
     files = {"file": (img_path.name, content, file.content_type or "image/png")}
+    retries = max(0, int(os.getenv("OCR_POST_RETRIES", "2")))
+    retry_delay = float(os.getenv("OCR_POST_RETRY_DELAY_SEC", "2"))
+    resp: httpx.Response | None = None
     try:
-        async with httpx.AsyncClient(timeout=120) as client:
-            resp = await client.post(target, files=files)
+        for attempt in range(retries + 1):
+            try:
+                async with httpx.AsyncClient(timeout=_ocr_upstream_timeout()) as client:
+                    resp = await client.post(target, files=files)
+                break
+            except (httpx.ReadError, httpx.RemoteProtocolError) as exc:
+                if attempt < retries:
+                    log.warning(
+                        "handwriting POST %s ReadError/RemoteProtocol (attempt %s/%s): %s; retry in %ss",
+                        target,
+                        attempt + 1,
+                        retries + 1,
+                        exc,
+                        retry_delay,
+                    )
+                    await asyncio.sleep(retry_delay)
+                    continue
+                log.warning("handwriting POST %s failed: %s", target, exc, exc_info=True)
+                raise HTTPException(
+                    status_code=502,
+                    detail=_ocr_request_error_detail(exc, target),
+                ) from exc
+            except httpx.RequestError as exc:
+                log.warning("handwriting POST %s failed: %s", target, exc, exc_info=True)
+                raise HTTPException(
+                    status_code=502,
+                    detail=_ocr_request_error_detail(exc, target),
+                ) from exc
+    except HTTPException:
+        raise
+    except (ConnectionError, OSError) as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"调用 OCR 识别接口时网络异常：{exc!s}",
+        ) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"call ocr failed: {exc}") from exc
+        raise HTTPException(
+            status_code=502,
+            detail=f"调用 OCR 识别接口异常：{exc!s}",
+        ) from exc
+
+    if resp is None:
+        raise HTTPException(status_code=502, detail="OCR 未返回响应（内部错误）")
 
     if resp.status_code >= 400:
-        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+        log.warning(
+            "handwriting OCR HTTP %s: %s",
+            resp.status_code,
+            (resp.text or "")[:2000],
+        )
+        raise HTTPException(status_code=502, detail=_ocr_upstream_error_detail(resp))
 
     try:
         data = resp.json()
@@ -182,7 +324,7 @@ async def api_handwriting_submit(
 
     return {
         "success": True,
-        "guid": guid,
+        "tick": stem,
         "fileName": img_path.name,
         "jsonPath": str(jp.relative_to(APP_DIR)).replace("\\", "/"),
         "ocr": data,
@@ -232,15 +374,24 @@ async def api_recognize(
     content = await file.read()
     files = {"file": (file.filename or "upload.jpg", content, file.content_type or "application/octet-stream")}
     try:
-        async with httpx.AsyncClient(timeout=120) as client:
+        async with httpx.AsyncClient(timeout=_ocr_upstream_timeout()) as client:
             resp = await client.post(target, files=files)
             if resp.status_code >= 400:
-                raise HTTPException(status_code=resp.status_code, detail=resp.text)
+                raise HTTPException(status_code=502, detail=_ocr_upstream_error_detail(resp))
             return resp.json()
     except HTTPException:
         raise
+    except httpx.RequestError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "调用 OCR 识别接口时网络失败或超时（此前 /health 已通过）。"
+                f"{_ocr_upstream_network_hint()} "
+                f"目标: {target}。技术信息: {exc!s}"
+            ),
+        ) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"call ocr failed: {exc}") from exc
+        raise HTTPException(status_code=502, detail=f"调用 OCR 识别接口异常：{exc!s}") from exc
 
 
 @app.post("/api/batch/run")
@@ -262,7 +413,7 @@ async def api_batch_run(req: BatchRequest):
         target = f"{ocr_base}/v1/ocr/document/{doc_type}"
     processed = []
     failed = []
-    async with httpx.AsyncClient(timeout=120) as client:
+    async with httpx.AsyncClient(timeout=_ocr_upstream_timeout()) as client:
         for img in to_process:
             try:
                 with img.open("rb") as f:

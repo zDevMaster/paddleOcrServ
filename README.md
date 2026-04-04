@@ -2,7 +2,7 @@
 
 **相关文档**
 
-- **[服务器部署.md](服务器部署.md)**：内网 Windows 服务器拷贝清单、离线安装、`startup.bat` 启动、任务计划开机自启  
+- **[服务器部署.md](服务器部署.md)**：内网 Windows 服务器拷贝清单、离线安装、`startupV4m.bat` / `startupv5m.bat` / `startupv5s.bat` 启动、任务计划开机自启  
 - **[CSharp-IIS-调用示例.md](CSharp-IIS-调用示例.md)**：IIS 场景下 C# 调用示例（JSON base64 等）
 
 面向 IIS 下 C# 多线程 HTTP 调用的 OCR 服务模板，目标：
@@ -13,7 +13,7 @@
 ## 1. 技术栈
 - FastAPI（HTTP/JSON）
 - PaddleOCR（中文 OCR）
-- 并发承载：**Linux** 可用 Gunicorn + UvicornWorker；**Windows** 请用项目根目录 `startup.bat`（内部为 uvicorn 多进程）
+- 并发承载：**Linux** 可用 Gunicorn + UvicornWorker；**Windows** 请用项目根目录启动脚本（见下文「启动脚本」，`uvicorn` 多进程）
 - OpenCV（图像预处理 + 质量评分）
 
 ## 2. 接口
@@ -72,12 +72,12 @@
 ## 6. 本地运行
 
 **Windows（推荐）**  
-安装依赖后，在项目根目录执行 **`startup.bat`**，或与脚本等价的手动命令：
+安装依赖后，在项目根目录执行与场景匹配的启动脚本（见 **§13**），或与脚本等价的手动命令（需自行设置 `OCR_DET_MODEL_NAME` / `OCR_REC_MODEL_NAME` 及 `OCR_WORKERS` 等）：
 
 ```powershell
 cd E:\paddleOcr
 .\.venv\Scripts\activate
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 5
 ```
 
 **Linux（可多进程生产）**
@@ -89,7 +89,7 @@ pip install -r requirements.txt
 python -m gunicorn -c gunicorn_conf.py app.main:app
 ```
 
-> 说明：`run.ps1` 依赖的参数名可能与 PowerShell 内置变量冲突；Windows 日常请以 **`startup.bat`** 为准。详见 [服务器部署.md](服务器部署.md)。
+> 说明：`run.ps1` 依赖的参数名可能与 PowerShell 内置变量冲突；Windows 日常请以根目录 **`startupV4m.bat` / `startupv5m.bat` / `startupv5s.bat`** 为准。详见 [服务器部署.md](服务器部署.md)。
 
 ## 7. IIS 部署（内网）
 常见方式是 IIS 反向代理到本服务（例如 `http://127.0.0.1:8000`）：
@@ -100,7 +100,7 @@ python -m gunicorn -c gunicorn_conf.py app.main:app
 
 ## 8. 并发与稳定建议
 - 单请求内部保持串行，避免在请求内并发 OCR。
-- 按 CPU 核数调整 `OCR_WORKERS`（默认 `cpu_count/2`）。
+- 调整 `OCR_WORKERS`：三个启动脚本默认 **5**（`startupv5s.bat` 使用 v5 server 大模型时若出现子进程退出，可改为调低 `OCR_WORKERS` 或换 `startupv5m.bat` / `startupV4m.bat`）。也可在运行前 `set OCR_WORKERS=N` 覆盖脚本内的默认值。
 - 生产建议加请求日志（带 `traceId`）与图片留档策略（按合规要求存储）。
 
 ## 9. 内网离线部署准备（外网机器先打包）
@@ -123,9 +123,8 @@ offline_bundle/
   paddle/
     paddlepaddle-*.whl            # CPU
   models/
-    ch_PP-OCRv4_det_infer/
-    ch_PP-OCRv4_rec_infer/
-    ch_ppocr_mobile_v2.0_cls_infer/
+    PP-OCRv5_server_det_infer/
+    PP-OCRv5_server_rec_infer/
   project/
     paddleOcr/                    # 当前项目代码
 ```
@@ -168,12 +167,7 @@ pip download paddlepaddle==<cpu_version> -d paddle
 ```
 
 ### 10.4 准备 PaddleOCR 模型文件
-需提前下载并放入内网可访问目录（例如 `E:\ocr-models\`），至少包括：
-- 文本检测模型（det）
-- 文本识别模型（rec）
-- 方向分类模型（cls）
-
-建议按固定目录存放，后续在服务启动参数或环境变量中指定模型路径。
+PaddleOCR 3.x（PaddleX）需使用带 `inference.yml` 的官方推理包。请执行 `python scripts/download_models.py --output offline_bundle/models`（从百度 BOS 拉取 `PP-OCRv5_server_*_infer.tar` 并解压）。旧版仅含 `inference.pdmodel` 的目录无法用于当前服务。
 
 ## 11. 内网服务器需要安装的内容（清单）
 
@@ -184,7 +178,7 @@ pip download paddlepaddle==<cpu_version> -d paddle
 - 项目代码（本仓库）
 - 离线 wheels 目录
 - Paddle 推理库 wheel（CPU）
-- PaddleOCR 模型目录（det/rec/cls）
+- PaddleOCR 模型目录（det/rec，PaddleX 推理包）
 
 ## 12. 内网服务器安装步骤（离线）
 
@@ -197,7 +191,7 @@ pip download paddlepaddle==<cpu_version> -d paddle
 2) 创建虚拟环境并激活  
 3) 先安装 Paddle（CPU），再安装锁定依赖  
 4) 模型目录使用项目内相对路径（默认无需改）  
-5) 运行 **`startup.bat`** 启动服务并访问 `/health`
+5) 运行与需求匹配的启动脚本（如 **`startupv5s.bat`**，见 §13）并访问 `/health`
 
 示例命令：
 ```powershell
@@ -212,38 +206,53 @@ pip install --no-index --find-links .\offline_bundle\paddle --find-links .\offli
 # pip install --no-index --find-links .\offline_bundle\paddle paddlepaddle==3.3.1
 # pip install --no-index --find-links .\offline_bundle\paddle --find-links .\offline_bundle\wheels -r .\offline_bundle\wheels\requirements-lock.txt
 
-# 启动（Windows）
-.\startup.bat
+# 启动（Windows，示例：v5 server）
+.\startupv5s.bat
 ```
 
 ### 12.1 程序中的模型相对路径（默认）
 程序默认读取以下相对路径（位于项目根目录）：
-- `offline_bundle/models/ch_PP-OCRv4_det_infer`
-- `offline_bundle/models/ch_PP-OCRv4_rec_infer`
-- `offline_bundle/models/ch_ppocr_mobile_v2.0_cls_infer`
+- `offline_bundle/models/PP-OCRv5_server_det_infer`
+- `offline_bundle/models/PP-OCRv5_server_rec_infer`
 
 如需覆盖，可设置环境变量：
 - `OCR_DET_MODEL_DIR`
 - `OCR_REC_MODEL_DIR`
-- `OCR_CLS_MODEL_DIR`
+
+### 12.2 为何默认选用 PP-OCRv5 server（与 mobile 的取舍）
+
+当前默认 **PP-OCRv5_server_det + PP-OCRv5_server_rec**（`scripts/download_models.py` 与 `app/ocr_engine.py` 已对齐），主要考虑是 **在通用中文场景下更高的识别精度**（官方基准优于 PP-OCRv4 mobile；详见 PaddleOCR `model_list`）。
+
+代价：**模型更大、CPU 推理更慢、内存更高**，无 GPU 时并发与延迟需自行压测。若环境算力很紧、更看重吞吐，可改为 **PP-OCRv5_mobile** 或 **PP-OCRv4_mobile** 对应推理包：同步更新 `download_models.py` 中的 tar 名与解压目录、`ocr_engine.py` 中的 `text_*_model_name` 与默认路径，并做一轮回归测试。
 
 ## 13. 启动服务指令（Windows）
 
-项目根目录执行 **`startup.bat`**（已内置 uvicorn 多进程、`PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK` 等内网友好默认值）。
+根目录提供 **三种** 启动脚本，均使用 **uvicorn 多进程**，并默认设置 `PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK`、`FLAGS_use_mkldnn` 等；**默认 `OCR_WORKERS=5`**（可按机器内存用环境变量覆盖）。
 
-可选环境变量（在运行前于同一 cmd 窗口 `set`）：
+| 脚本 | 检测模型 | 识别模型 | 说明 |
+|------|-----------|-----------|------|
+| `startupV4m.bat` | `PP-OCRv4_mobile_det` | `PP-OCRv4_mobile_rec` | 体积极小、速度快，精度低于 v5 |
+| `startupv5m.bat` | `PP-OCRv5_mobile_det` | `PP-OCRv5_mobile_rec` | v5 mobile，速度与精度折中 |
+| `startupv5s.bat` | `PP-OCRv5_server_det` | `PP-OCRv5_server_rec` | 默认高精度，**内存与 CPU 占用最高**；多 worker 时更易 OOM |
+
+模型目录默认相对项目根：`offline_bundle/models/<模型名>_infer`（由 `scripts/download_models.py` 下载）。若模型在其他盘，可设置 `OCR_DET_MODEL_DIR` / `OCR_REC_MODEL_DIR`（绝对路径）。
+
+**前台**：双击或在 cmd 中执行 `startupv5m.bat`（按需换脚本）。  
+**后台**（新开最小化窗口）：`startupv5m.bat bg`，或 `set OCR_BACKGROUND=1` 后执行同一脚本。
+
+可选环境变量（在运行前于同一 cmd 窗口 `set`，可覆盖脚本内默认值）：
 
 ```bat
-set OCR_WORKERS=4
+set OCR_WORKERS=3
 set OCR_PORT=8000
 set OCR_HOST=0.0.0.0
 ```
 
-详细说明见 [服务器部署.md](服务器部署.md) 第 5 节。
+更细的步骤与任务计划见 [服务器部署.md](服务器部署.md) 第 5～6 节。
 
 ## 14. 配置开机自动启动（Windows Server 2016 / 10 / 11）
 
-使用任务计划程序，在**系统启动时**执行项目根目录的 **`startup.bat`**（程序填 `cmd.exe`，参数 `/c "E:\paddleOcr\startup.bat"`，“起始于”填 `E:\paddleOcr`）。
+使用任务计划程序，在**系统启动时**执行项目根目录的 **任选启动脚本**（例如 `startupv5s.bat`）：程序填 `cmd.exe`，参数 `/c "E:\paddleOcr\startupv5s.bat"`（后台可加 `bg`），“起始于”填 `E:\paddleOcr`。
 
 分步截图级说明与验证方法见 **[服务器部署.md](服务器部署.md) 第 6 节**。
 

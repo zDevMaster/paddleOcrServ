@@ -20,14 +20,14 @@
 ## 3. OCR 与抽取策略要点
 - 每个进程内 OCR 模型单例（避免重复加载）。
 - 证件抽取以“关键词锚点 + 正则”组合实现，字段缺失走 `fallback_missing`。
-- 默认模型路径使用相对目录：
-  - `offline_bundle/models/ch_PP-OCRv4_det_infer`
-  - `offline_bundle/models/ch_PP-OCRv4_rec_infer`
-  - `offline_bundle/models/ch_ppocr_mobile_v2.0_cls_infer`
+- 默认模型路径使用相对目录（PaddleX 推理包，含 `inference.yml`）：
+  - `offline_bundle/models/PP-OCRv5_server_det_infer`
+  - `offline_bundle/models/PP-OCRv5_server_rec_infer`
 
 ## 4. 部署运行结论（本次会话已验证）
+- **Agent 约定**：每次修改 `app/` 内微服务代码后，在同一会话内自行重启 OCR 微服务（`8000`），便于用户直接测试。
 - Windows 上不要用 `gunicorn` 运行（依赖 `fcntl`，不可用）。
-- Windows 推荐统一用 `startup.bat`（内部 `uvicorn` 多进程）。
+- Windows 推荐用根目录 `startupV4m.bat` / `startupv5m.bat` / `startupv5s.bat`（内部 `uvicorn` 多进程，见 README）。
 - `run.ps1` 历史上有 `Host` 参数与 PowerShell 内置变量冲突风险，不作为主入口。
 - 内网环境建议设置 `PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=1`，避免联网检查卡顿。
 
@@ -49,12 +49,12 @@
 - `test/README.md`：测试网站与批量测试说明
 
 ## 7. 测试网站（test）能力
-- 入口：`test/start_test_site.bat`，默认 `http://127.0.0.1:9000`
+- 入口：`test/start_test_site.bat`，默认监听 `0.0.0.0:9000`（本机 `http://127.0.0.1:9000`，局域网用 `http://<本机IP>:9000`；防火墙需放行入站 9000）
 - 批量页面：  
   - `/batch/idcard`  
   - `/batch/vehicle_license`  
   - `/batch/driver_license`  
-  - `/batch/handwriting`（画布签名 → `test/data/HandWrite/{guid}.png` + 同名 `.json`）
+  - `/batch/handwriting`（画布签名 → `test/data/HandWrite/{纳秒tick}.png` + 同名 `.json`）
 - 批量规则：
   - 每次处理批次可选：`5/10/20/50/100`
   - 仅处理尚未生成同名 `.json` 的图片（断点续跑）
