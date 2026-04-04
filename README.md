@@ -143,7 +143,7 @@ cd E:\paddleOcr
 .\scripts\prepare_offline_assets.ps1 -PythonExe python -PaddleVersion 3.3.1
 ```
 
-执行后会把 **锁定清单中的全部 wheel**（含 `paddlepaddle` 及 OCR 依赖）、**Paddle CPU 栈（写入 `offline_bundle/paddle`）**、PaddleOCR 模型下载到 `offline_bundle` 对应目录。内网安装命令见 [服务器部署.md](服务器部署.md) 第 3 节。
+执行后会把 **锁定清单中的全部 wheel**（含 `paddlepaddle` 及 OCR 依赖）、**Paddle CPU 栈（写入 `offline_bundle/paddle`）**、PaddleOCR 模型下载到 `offline_bundle` 对应目录，并运行 **`scripts/verify_offline_bundle.py`** 自检。内网安装命令见 [服务器部署.md](服务器部署.md) 第 3 节；拷贝前也可单独执行 `python scripts/verify_offline_bundle.py`。
 
 ### 10.1 固定 Python 与依赖版本
 建议先生成锁定文件，避免内网安装时版本漂移：

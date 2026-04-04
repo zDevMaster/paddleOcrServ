@@ -15,12 +15,22 @@ MODEL_URLS = {
 }
 
 
+def _model_is_complete(target_dir: Path) -> bool:
+    """至少包含推理所需的 pdmodel 与 pdiparams（避免仅存在占位文件时误跳过）。"""
+    if not target_dir.is_dir():
+        return False
+    return (target_dir / "inference.pdmodel").is_file() and (target_dir / "inference.pdiparams").is_file()
+
+
 def download_and_extract(name: str, url: str, output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     target_dir = output_dir / name
-    if target_dir.exists():
+    if _model_is_complete(target_dir):
         print(f"skip existing: {target_dir}")
         return
+    if target_dir.exists():
+        print(f"incomplete or stale, removing: {target_dir}")
+        shutil.rmtree(target_dir)
 
     with tempfile.TemporaryDirectory() as tmp:
         tar_path = Path(tmp) / f"{name}.tar"
