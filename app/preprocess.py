@@ -66,6 +66,28 @@ def compute_quality(image: np.ndarray) -> dict[str, float]:
     }
 
 
+def ensure_min_edge(image: np.ndarray, min_edge: int) -> np.ndarray:
+    """过小的手写图有效像素少，识别易把形近字混淆（如 四/团）；按比例放大后再走检测与识别。"""
+    if min_edge <= 0:
+        return image
+    h, w = image.shape[:2]
+    edge = max(h, w)
+    if edge >= min_edge:
+        return image
+    scale = min_edge / float(edge)
+    nw, nh = int(round(w * scale)), int(round(h * scale))
+    return cv2.resize(image, (nw, nh), interpolation=cv2.INTER_CUBIC)
+
+
+def pad_white_border(image: np.ndarray, margin: int = 28) -> np.ndarray:
+    """手写/签名常贴边，四周加白边有利于检测框完整包住笔画。"""
+    if margin <= 0:
+        return image
+    return cv2.copyMakeBorder(
+        image, margin, margin, margin, margin, cv2.BORDER_CONSTANT, value=(255, 255, 255)
+    )
+
+
 def image_pipeline(image: np.ndarray, options: dict[str, Any] | None = None) -> np.ndarray:
     options = options or {}
     max_edge = int(options.get("maxEdge", 1600))

@@ -14,9 +14,12 @@ PADDLE = ROOT / "offline_bundle/paddle"
 MODEL_ROOT = ROOT / "offline_bundle/models"
 
 MODEL_DIRS = (
-    "ch_PP-OCRv4_det_infer",
-    "ch_PP-OCRv4_rec_infer",
-    "ch_ppocr_mobile_v2.0_cls_infer",
+    "PP-OCRv4_mobile_det_infer",
+    "PP-OCRv4_mobile_rec_infer",
+    "PP-OCRv5_mobile_det_infer",
+    "PP-OCRv5_mobile_rec_infer",
+    "PP-OCRv5_server_det_infer",
+    "PP-OCRv5_server_rec_infer",
 )
 
 
@@ -24,7 +27,7 @@ def verify_models() -> list[str]:
     errors: list[str] = []
     for name in MODEL_DIRS:
         d = MODEL_ROOT / name
-        for fn in ("inference.pdmodel", "inference.pdiparams"):
+        for fn in ("inference.yml", "inference.pdiparams", "inference.json"):
             p = d / fn
             if not p.is_file():
                 errors.append(f"模型缺失: {p.relative_to(ROOT)}")

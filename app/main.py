@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import time
+import traceback
 import uuid
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
@@ -8,7 +10,28 @@ from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from app.extractors import extract_by_doc_type, extract_handwriting
 from app.models import DocumentType, ImageJsonRequest, OcrResponse
 from app.ocr_engine import run_ocr
-from app.preprocess import decode_image_from_base64, image_pipeline, read_upload_bytes
+from app.preprocess import (
+    decode_image_from_base64,
+    ensure_min_edge,
+    image_pipeline,
+    pad_white_border,
+    read_upload_bytes,
+)
+from app.recognition_log import (
+    KIND_DRIVER_LICENSE,
+    KIND_HANDWRITING,
+    KIND_IDCARD,
+    KIND_VEHICLE_LICENSE,
+    log_error,
+    log_success,
+)
+
+_DOC_KIND = {
+    DocumentType.idcard: KIND_IDCARD,
+    DocumentType.vehicle_license: KIND_VEHICLE_LICENSE,
+    DocumentType.driver_license: KIND_DRIVER_LICENSE,
+    DocumentType.handwriting: KIND_HANDWRITING,
+}
 
 app = FastAPI(title="Intranet OCR Service", version="1.0.0")
 
@@ -55,26 +78,102 @@ def health():
 async def ocr_general(request: Request, file: UploadFile | None = File(default=None)):
     started = time.perf_counter()
     trace_id = uuid.uuid4().hex
+    kind = KIND_HANDWRITING
 
-    image, options = await _load_image_from_request(request, file)
-    image = image_pipeline(image, options)
+    try:
+        image, options = await _load_image_from_request(request, file)
+        image = image_pipeline(image, options)
+        min_edge = int(os.getenv("OCR_HANDWRITING_MIN_EDGE", "128"))
+        image = ensure_min_edge(image, min_edge=min_edge)
+        pad = int(os.getenv("OCR_HANDWRITING_PAD", "28"))
+        image = pad_white_border(image, margin=pad)
 
-    lines = run_ocr(image)
-    fields, _, _, text = extract_handwriting(lines)
-    elapsed = int((time.perf_counter() - started) * 1000)
-    return _build_response(trace_id, elapsed, "general", fields, text)
+        lines = run_ocr(image, handwriting=True)
+        fields, _, _, text = extract_handwriting(lines)
+        elapsed = int((time.perf_counter() - started) * 1000)
+        log_success(
+            kind,
+            trace_id,
+            elapsed,
+            {"docType": "general", "text": text, "fields": fields},
+        )
+        return _build_response(trace_id, elapsed, "general", fields, text)
+    except HTTPException as exc:
+        elapsed = int((time.perf_counter() - started) * 1000)
+        log_error(
+            kind,
+            trace_id,
+            elapsed,
+            category="client_error",
+            message=f"HTTP {exc.status_code} detail={exc.detail!s}",
+            traceback_text=None,
+        )
+        raise
+    except Exception as exc:
+        elapsed = int((time.perf_counter() - started) * 1000)
+        log_error(
+            kind,
+            trace_id,
+            elapsed,
+            category="exception",
+            message=str(exc),
+            traceback_text=traceback.format_exc(),
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"识别过程异常: {exc!s}",
+        ) from exc
 
 
 @app.post("/v1/ocr/document/{doc_type}", response_model=OcrResponse)
 async def ocr_document(doc_type: DocumentType, request: Request, file: UploadFile | None = File(default=None)):
     started = time.perf_counter()
     trace_id = uuid.uuid4().hex
+    kind = _DOC_KIND[doc_type]
 
-    image, options = await _load_image_from_request(request, file)
-    image = image_pipeline(image, options)
+    try:
+        image, options = await _load_image_from_request(request, file)
+        image = image_pipeline(image, options)
+        hw = doc_type == DocumentType.handwriting
+        if hw:
+            min_edge = int(os.getenv("OCR_HANDWRITING_MIN_EDGE", "128"))
+            image = ensure_min_edge(image, min_edge=min_edge)
+            pad = int(os.getenv("OCR_HANDWRITING_PAD", "28"))
+            image = pad_white_border(image, margin=pad)
 
-    lines = run_ocr(image)
-    fields, _, _, text = extract_by_doc_type(doc_type, lines)
-    elapsed = int((time.perf_counter() - started) * 1000)
-    return _build_response(trace_id, elapsed, doc_type.value, fields, text)
+        lines = run_ocr(image, handwriting=hw)
+        fields, _, _, text = extract_by_doc_type(doc_type, lines)
+        elapsed = int((time.perf_counter() - started) * 1000)
+        log_success(
+            kind,
+            trace_id,
+            elapsed,
+            {"docType": doc_type.value, "text": text, "fields": fields},
+        )
+        return _build_response(trace_id, elapsed, doc_type.value, fields, text)
+    except HTTPException as exc:
+        elapsed = int((time.perf_counter() - started) * 1000)
+        log_error(
+            kind,
+            trace_id,
+            elapsed,
+            category="client_error",
+            message=f"HTTP {exc.status_code} detail={exc.detail!s}",
+            traceback_text=None,
+        )
+        raise
+    except Exception as exc:
+        elapsed = int((time.perf_counter() - started) * 1000)
+        log_error(
+            kind,
+            trace_id,
+            elapsed,
+            category="exception",
+            message=str(exc),
+            traceback_text=traceback.format_exc(),
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"识别过程异常: {exc!s}",
+        ) from exc
 

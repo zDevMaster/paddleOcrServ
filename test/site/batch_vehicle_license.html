@@ -2,13 +2,15 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>行驶证批量测试</title>
   <style>
-    body{font-family:"Microsoft YaHei",Arial,sans-serif;margin:16px;background:#f4f6f8}
+    html{box-sizing:border-box}
+    *,*::before,*::after{box-sizing:inherit}
+    body{font-family:"Microsoft YaHei",Arial,sans-serif;margin:0;padding:16px;background:#f4f6f8;touch-action:manipulation;min-height:100%}
     .top{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:12px;margin-bottom:12px}
     .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
-    input,select,button{height:32px;padding:4px 8px}
+    input,select,button{height:36px;padding:4px 10px}
     .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
     .panel{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:10px}
     .imgbox{height:360px;display:flex;align-items:center;justify-content:center;background:#111827}
@@ -26,14 +28,15 @@
     <div class="row">
       <label>OCR 服务地址</label>
       <input id="ocrBase" type="text" value="http://127.0.0.1:8000" style="min-width:280px" />
-      <button id="btnHealth">检查 health</button>
+      <button id="btnHealth" type="button">检查 health</button>
     </div>
+    <p style="margin:8px 0 0 0;font-size:13px;color:#64748b">测试站与 OCR 同机请用 <code>127.0.0.1:8000</code>；跨机请用 OCR 所在机 IP。首请求加载模型可能较慢。</p>
     <div class="row">
       <label>批次大小</label>
       <select id="batchSize">
         <option>5</option><option>10</option><option selected>20</option><option>50</option><option>100</option>
       </select>
-      <button id="btnRun">批量测试（仅未生成 .json）</button>
+      <button id="btnRun" type="button">批量测试（仅未生成 .json）</button>
       <span id="runInfo"></span>
     </div>
     <div class="row">
@@ -41,7 +44,7 @@
       <select id="pageSize">
         <option>10</option><option selected>20</option><option>30</option><option>50</option>
       </select>
-      <button id="btnLoad">刷新列表</button>
+      <button id="btnLoad" type="button">刷新列表</button>
       <span id="stats"></span>
     </div>
   </div>
@@ -52,9 +55,9 @@
       <div id="fileName"></div>
       <div class="imgbox"><img id="preview" alt="preview" /></div>
       <div class="pager">
-        <button id="prev">上一张</button>
+        <button id="prev" type="button">上一张</button>
         <span id="pos"></span>
-        <button id="next">下一张</button>
+        <button id="next" type="button">下一张</button>
       </div>
     </div>
     <div class="panel">
@@ -66,7 +69,17 @@
   <script>
     const DOC_TYPE = "vehicle_license";
     let currentPage = 1, currentIndex = 0, lastData = null;
+    let mediaBust = Date.now();
     const $ = (id)=>document.getElementById(id);
+    function totalPages(data) {
+      if (!data || !data.total) return 1;
+      const ps = data.pageSize || 20;
+      return Math.max(1, Math.ceil(data.total / ps));
+    }
+    function imgSrc(url) {
+      const u = String(url);
+      return u + (u.includes("?") ? "&" : "?") + "v=" + mediaBust;
+    }
     async function health(){ const base=$("ocrBase").value.trim(); const r=await fetch(`/api/health?ocrBase=${encodeURIComponent(base)}`); alert(JSON.stringify(await r.json())); }
     function formatApiErr(d){
       if(!d||d.detail==null) return "";
@@ -86,11 +99,15 @@
       await loadPage(1);
     }
     async function loadPage(page){
-      currentPage=page;
+      currentPage = Math.max(1, page);
       const size=parseInt($("pageSize").value,10);
-      const r=await fetch(`/api/batch/results?docType=${DOC_TYPE}&page=${page}&pageSize=${size}`);
-      lastData=await r.json(); currentIndex=0;
-      $("stats").textContent=`总数:${lastData.total} 已识别 ${lastData.recognized} 未识别 ${lastData.unrecognized} 页 ${lastData.page}`;
+      const r=await fetch(`/api/batch/results?docType=${DOC_TYPE}&page=${currentPage}&pageSize=${size}`, { cache: "no-store" });
+      lastData=await r.json();
+      const tp = totalPages(lastData);
+      if (currentPage > tp) { currentPage = tp; return loadPage(currentPage); }
+      mediaBust = Date.now();
+      currentIndex=0;
+      $("stats").textContent=`总数:${lastData.total} 已识别 ${lastData.recognized} 未识别 ${lastData.unrecognized} 第 ${lastData.page}/${tp} 页`;
       renderItem();
     }
     function renderItem(){
@@ -99,12 +116,13 @@
       if(currentIndex<0) currentIndex=0; if(currentIndex>=items.length) currentIndex=items.length-1;
       const it=items[currentIndex];
       $("fileName").textContent=`${it.fileName} ${it.jsonExists?"[已识别]":"[未识别]"}`;
-      $("preview").src=it.imageUrl;
+      $("preview").src=imgSrc(it.imageUrl);
       $("jsonBox").textContent=it.jsonExists?it.jsonText:"尚未生成 .json（未识别）";
       $("pos").textContent=`${currentIndex+1}/${items.length}`;
     }
     $("btnHealth").onclick=health; $("btnRun").onclick=runBatch; $("btnLoad").onclick=()=>loadPage(currentPage);
     $("prev").onclick=()=>{currentIndex--;renderItem();}; $("next").onclick=()=>{currentIndex++;renderItem();};
+    $("pageSize").onchange = () => loadPage(1);
     loadPage(1);
   </script>
 </body>
