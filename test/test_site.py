@@ -1,7 +1,7 @@
 ﻿from __future__ import annotations
 
 import json
-import os
+import uuid
 from pathlib import Path
 
 import httpx
@@ -20,20 +20,24 @@ DOC_TO_DIR = {
     "idcard": "idcard",
     "vehicle_license": "VehicleLicense",
     "driver_license": "DrivingLicense",
+    "handwriting": "HandWrite",
 }
 
 app = FastAPI(title="OCR Batch Test Site", version="2.0.0")
 
 
 class BatchRequest(BaseModel):
-    docType: str = Field(..., description="idcard/vehicle_license/driver_license")
+    docType: str = Field(..., description="idcard/vehicle_license/driver_license/handwriting")
     batchSize: int = Field(10, description="5-100")
     ocrBase: str = Field(DEFAULT_OCR_BASE)
 
 
 def _doc_folder(doc_type: str) -> Path:
     if doc_type not in DOC_TO_DIR:
-        raise HTTPException(status_code=400, detail="docType must be idcard/vehicle_license/driver_license")
+        raise HTTPException(
+            status_code=400,
+            detail="docType must be idcard/vehicle_license/driver_license/handwriting",
+        )
     folder = DATA_DIR / DOC_TO_DIR[doc_type]
     folder.mkdir(parents=True, exist_ok=True)
     return folder
@@ -87,6 +91,53 @@ def page_vehicle() -> HTMLResponse:
 @app.get("/batch/driver_license", response_class=HTMLResponse)
 def page_driver() -> HTMLResponse:
     return _html_page("batch_driver_license.html")
+
+
+@app.get("/batch/handwriting", response_class=HTMLResponse)
+def page_handwriting() -> HTMLResponse:
+    return _html_page("batch_handwriting.html")
+
+
+@app.post("/api/handwriting/submit")
+async def api_handwriting_submit(
+    file: UploadFile = File(...),
+    ocrBase: str = Form(DEFAULT_OCR_BASE),
+):
+    """画布手写签名：保存为 test/data/HandWrite/{uuid}.png，调用 /v1/ocr/general，写回同名 .json。"""
+    ocr_base = (ocrBase or DEFAULT_OCR_BASE).rstrip("/")
+    folder = DATA_DIR / "HandWrite"
+    folder.mkdir(parents=True, exist_ok=True)
+    guid = uuid.uuid4().hex
+    img_path = folder / f"{guid}.png"
+    content = await file.read()
+    img_path.write_bytes(content)
+
+    target = f"{ocr_base}/v1/ocr/general"
+    files = {"file": (img_path.name, content, file.content_type or "image/png")}
+    try:
+        async with httpx.AsyncClient(timeout=120) as client:
+            resp = await client.post(target, files=files)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"call ocr failed: {exc}") from exc
+
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+
+    try:
+        data = resp.json()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"invalid ocr json: {exc}") from exc
+
+    jp = img_path.with_suffix(".json")
+    jp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    return {
+        "success": True,
+        "guid": guid,
+        "fileName": img_path.name,
+        "jsonPath": str(jp.relative_to(APP_DIR)).replace("\\", "/"),
+        "ocr": data,
+    }
 
 
 @app.get("/api/image/{doc_type}/{filename}")
@@ -152,7 +203,10 @@ async def api_batch_run(req: BatchRequest):
     pending = [p for p in images if not _json_path_for(p).exists()]
     to_process = pending[:batch_size]
 
-    target = f"{ocr_base}/v1/ocr/document/{doc_type}"
+    if doc_type == "handwriting":
+        target = f"{ocr_base}/v1/ocr/general"
+    else:
+        target = f"{ocr_base}/v1/ocr/document/{doc_type}"
     processed = []
     failed = []
     async with httpx.AsyncClient(timeout=120) as client:

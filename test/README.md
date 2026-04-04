@@ -8,6 +8,7 @@
 - `site/batch_idcard.html`：身份证批量测试页
 - `site/batch_vehicle_license.html`：行驶证批量测试页
 - `site/batch_driver_license.html`：驾驶证批量测试页
+- `site/batch_handwriting.html`：手写签名画布 → 保存 `HandWrite/{guid}.png` + 识别 `json`
 - `start_test_site.bat`：本地启动测试网站脚本
 
 ## 启动测试网站
@@ -26,6 +27,7 @@ start_test_site.bat
   - 身份证：`/batch/idcard`
   - 行驶证：`/batch/vehicle_license`
   - 驾驶证：`/batch/driver_license`
+  - 手写签名：`/batch/handwriting`（网页/触屏书写，提交后以 GUID 存图并识别）
 
 ## 批量测试规则
 

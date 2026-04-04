@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>手写签名识别测试</title>
+  <style>
+    body{font-family:"Microsoft YaHei",Arial,sans-serif;margin:16px;background:#f4f6f8;touch-action:manipulation}
+    .top{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:12px;margin-bottom:12px}
+    .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+    input,select,button{height:36px;padding:4px 10px}
+    .sign-wrap{background:#fff;border:1px solid #cbd5e1;border-radius:10px;padding:10px;margin-bottom:12px;max-width:720px}
+    #signCanvas{display:block;width:100%;height:220px;background:#fff;border:1px dashed #94a3b8;border-radius:8px;touch-action:none;cursor:crosshair}
+    .hint{color:#64748b;font-size:13px;margin-top:8px}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    @media (max-width:720px){ .grid{grid-template-columns:1fr} }
+    .panel{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:10px}
+    .imgbox{height:360px;display:flex;align-items:center;justify-content:center;background:#111827}
+    .imgbox img{max-width:100%;max-height:100%;object-fit:contain}
+    pre{height:360px;overflow:auto;background:#0b1020;color:#d1e7ff;padding:10px;border-radius:8px;font-size:12px}
+    .pager{display:flex;gap:8px;align-items:center;margin-top:8px}
+  </style>
+</head>
+<body>
+  <div class="top">
+    <div class="row">
+      <strong>手写签名识别测试</strong>
+      <a href="/" style="margin-left:8px">返回入口</a>
+    </div>
+    <div class="row">
+      <label>OCR 服务地址</label>
+      <input id="ocrBase" type="text" value="http://127.0.0.1:8000" style="min-width:260px" />
+      <button id="btnHealth" type="button">检查 health</button>
+    </div>
+  </div>
+
+  <div class="sign-wrap">
+    <p style="margin:0 0 8px 0">在下方区域手写签名（支持触摸屏）。提交后以 <strong>GUID</strong> 文件名保存到 <code>test/data/HandWrite</code>，并调用通用 OCR 生成同名 <code>.json</code>。</p>
+    <canvas id="signCanvas" width="700" height="220"></canvas>
+    <div class="row" style="margin-top:10px">
+      <button id="btnClear" type="button">清空画布</button>
+      <button id="btnSubmit" type="button" style="background:#2563eb;color:#fff;border:0;border-radius:8px">提交识别</button>
+      <span id="submitInfo"></span>
+    </div>
+    <p class="hint">若仅想补跑目录里尚未生成 json 的图片，可使用下方批量测试（与身份证测试相同规则）。</p>
+  </div>
+
+  <div class="top">
+    <div class="row">
+      <label>批次大小</label>
+      <select id="batchSize">
+        <option>5</option><option>10</option><option selected>20</option><option>50</option><option>100</option>
+      </select>
+      <button id="btnRun" type="button">批量测试（仅未生成 .json）</button>
+      <span id="runInfo"></span>
+    </div>
+    <div class="row">
+      <label>每页条数</label>
+      <select id="pageSize">
+        <option>10</option><option selected>20</option><option>30</option><option>50</option>
+      </select>
+      <button id="btnLoad" type="button">刷新列表</button>
+      <span id="stats"></span>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="panel">
+      <h3>左侧：已保存图片</h3>
+      <div id="fileName"></div>
+      <div class="imgbox"><img id="preview" alt="preview" /></div>
+      <div class="pager">
+        <button id="prev" type="button">上一张</button>
+        <span id="pos"></span>
+        <button id="next" type="button">下一张</button>
+      </div>
+    </div>
+    <div class="panel">
+      <h3>右侧：识别结果 JSON</h3>
+      <pre id="jsonBox">等待加载...</pre>
+    </div>
+  </div>
+
+  <script>
+    const DOC_TYPE = "handwriting";
+    let currentPage = 1, currentIndex = 0, lastData = null;
+    const $ = (id) => document.getElementById(id);
+
+    const canvas = $("signCanvas");
+    const ctx = canvas.getContext("2d");
+    let drawing = false, lastX = 0, lastY = 0;
+
+    function fitCanvas() {
+      const wrap = canvas.parentElement;
+      const w = Math.min(700, wrap.clientWidth || 700);
+      const h = 220;
+      const dpr = window.devicePixelRatio || 1;
+      canvas.style.width = w + "px";
+      canvas.style.height = h + "px";
+      canvas.width = Math.floor(w * dpr);
+      canvas.height = Math.floor(h * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, w, h);
+      ctx.strokeStyle = "#111827";
+      ctx.lineWidth = 2.5;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+    }
+
+    function pos(ev) {
+      const r = canvas.getBoundingClientRect();
+      const clientX = ev.touches ? ev.touches[0].clientX : ev.clientX;
+      const clientY = ev.touches ? ev.touches[0].clientY : ev.clientY;
+      return { x: clientX - r.left, y: clientY - r.top };
+    }
+
+    function startDraw(ev) {
+      ev.preventDefault();
+      drawing = true;
+      const p = pos(ev);
+      lastX = p.x; lastY = p.y;
+    }
+    function moveDraw(ev) {
+      if (!drawing) return;
+      ev.preventDefault();
+      const p = pos(ev);
+      ctx.beginPath();
+      ctx.moveTo(lastX, lastY);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+      lastX = p.x; lastY = p.y;
+    }
+    function endDraw(ev) {
+      if (drawing) { ev.preventDefault(); }
+      drawing = false;
+    }
+
+    canvas.addEventListener("mousedown", startDraw);
+    canvas.addEventListener("mousemove", moveDraw);
+    canvas.addEventListener("mouseup", endDraw);
+    canvas.addEventListener("mouseleave", endDraw);
+    canvas.addEventListener("touchstart", startDraw, { passive: false });
+    canvas.addEventListener("touchmove", moveDraw, { passive: false });
+    canvas.addEventListener("touchend", endDraw);
+
+    $("btnClear").onclick = () => { fitCanvas(); $("submitInfo").textContent = ""; };
+    fitCanvas();
+    window.addEventListener("resize", () => { fitCanvas(); });
+
+    $("btnSubmit").onclick = () => {
+      $("submitInfo").textContent = "提交中...";
+      canvas.toBlob((blob) => {
+        if (!blob || blob.size < 80) {
+          $("submitInfo").textContent = "请先手写签名";
+          return;
+        }
+        const fd = new FormData();
+        fd.append("file", blob, "signature.png");
+        fd.append("ocrBase", $("ocrBase").value.trim());
+        fetch("/api/handwriting/submit", { method: "POST", body: fd })
+          .then((r) => r.json().then((d) => ({ ok: r.ok, status: r.status, d })))
+          .then(({ ok, status, d }) => {
+            if (!ok) {
+              $("submitInfo").textContent = "失败: " + (d.detail || status);
+              return;
+            }
+            $("submitInfo").textContent = "已保存 " + d.fileName + "，可下方浏览";
+            loadPage(1);
+          })
+          .catch((e) => { $("submitInfo").textContent = "错误: " + e; });
+      }, "image/png");
+    };
+
+    async function health() {
+      const base = $("ocrBase").value.trim();
+      const r = await fetch(`/api/health?ocrBase=${encodeURIComponent(base)}`);
+      alert(JSON.stringify(await r.json()));
+    }
+
+    async function runBatch() {
+      $("runInfo").textContent = "执行中...";
+      const payload = { docType: DOC_TYPE, batchSize: parseInt($("batchSize").value, 10), ocrBase: $("ocrBase").value.trim() };
+      const r = await fetch("/api/batch/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const d = await r.json();
+      $("runInfo").textContent = `已处理 ${d.processedCount}，失败 ${d.failedCount}，剩余 ${d.pendingAfterRun}`;
+      await loadPage(1);
+    }
+
+    async function loadPage(page) {
+      currentPage = page;
+      const size = parseInt($("pageSize").value, 10);
+      const r = await fetch(`/api/batch/results?docType=${DOC_TYPE}&page=${page}&pageSize=${size}`);
+      lastData = await r.json();
+      currentIndex = 0;
+      $("stats").textContent = `总数:${lastData.total} 已识别 ${lastData.recognized} 未识别 ${lastData.unrecognized} 页 ${lastData.page}`;
+      renderItem();
+    }
+
+    function renderItem() {
+      const items = (lastData && lastData.items) || [];
+      if (items.length === 0) {
+        $("fileName").textContent = "当前页无数据（可先提交签名或放入图片）";
+        $("preview").src = "";
+        $("jsonBox").textContent = "";
+        $("pos").textContent = "0/0";
+        return;
+      }
+      if (currentIndex < 0) currentIndex = 0;
+      if (currentIndex >= items.length) currentIndex = items.length - 1;
+      const it = items[currentIndex];
+      $("fileName").textContent = `${it.fileName} ${it.jsonExists ? "[已识别]" : "[未识别]"}`;
+      $("preview").src = it.imageUrl;
+      $("jsonBox").textContent = it.jsonExists ? it.jsonText : "尚未生成 .json（未识别）";
+      $("pos").textContent = `${currentIndex + 1}/${items.length}`;
+    }
+
+    $("btnHealth").onclick = health;
+    $("btnRun").onclick = runBatch;
+    $("btnLoad").onclick = () => loadPage(currentPage);
+    $("prev").onclick = () => { currentIndex--; renderItem(); };
+    $("next").onclick = () => { currentIndex++; renderItem(); };
+    loadPage(1);
+  </script>
+</body>
+</html>

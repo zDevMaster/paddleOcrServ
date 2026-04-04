@@ -50,10 +50,11 @@
 
 ## 7. 测试网站（test）能力
 - 入口：`test/start_test_site.bat`，默认 `http://127.0.0.1:9000`
-- 批量页面：
-  - `/batch/idcard`
-  - `/batch/vehicle_license`
-  - `/batch/driver_license`
+- 批量页面：  
+  - `/batch/idcard`  
+  - `/batch/vehicle_license`  
+  - `/batch/driver_license`  
+  - `/batch/handwriting`（画布签名 → `test/data/HandWrite/{guid}.png` + 同名 `.json`）
 - 批量规则：
   - 每次处理批次可选：`5/10/20/50/100`
   - 仅处理尚未生成同名 `.json` 的图片（断点续跑）
