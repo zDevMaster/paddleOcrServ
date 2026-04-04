@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -30,6 +31,11 @@ DOC_TO_DIR = {
 app = FastAPI(title="OCR Batch Test Site", version="2.0.0")
 
 log = logging.getLogger("test_site")
+
+
+def _ocr_json_body_from_bytes(content: bytes) -> dict:
+    """与微服务 `ImageJsonRequest` 一致：纯 Base64，无 Data URL 前缀。"""
+    return {"imageBase64": base64.b64encode(content).decode("ascii")}
 
 
 def _ocr_upstream_timeout() -> httpx.Timeout:
@@ -244,7 +250,7 @@ async def api_handwriting_submit(
     file: UploadFile = File(...),
     ocrBase: str = Form(DEFAULT_OCR_BASE),
 ):
-    """画布手写签名：保存为 test/data/HandWrite/{纳秒tick}.png，调用 /v1/ocr/general，写回同名 .json。"""
+    """画布手写签名：保存为 test/data/HandWrite/{纳秒tick}.png，以 JSON+imageBase64 调用 /v1/ocr/general，写回同名 .json。"""
     ocr_base = (ocrBase or DEFAULT_OCR_BASE).rstrip("/")
     content = await file.read()
     await _require_ocr_service(ocr_base)
@@ -257,7 +263,7 @@ async def api_handwriting_submit(
     img_path.write_bytes(content)
 
     target = f"{ocr_base}/v1/ocr/general"
-    files = {"file": (img_path.name, content, file.content_type or "image/png")}
+    json_body = _ocr_json_body_from_bytes(content)
     retries = max(0, int(os.getenv("OCR_POST_RETRIES", "2")))
     retry_delay = float(os.getenv("OCR_POST_RETRY_DELAY_SEC", "2"))
     resp: httpx.Response | None = None
@@ -265,7 +271,7 @@ async def api_handwriting_submit(
         for attempt in range(retries + 1):
             try:
                 async with httpx.AsyncClient(timeout=_ocr_upstream_timeout()) as client:
-                    resp = await client.post(target, files=files)
+                    resp = await client.post(target, json=json_body)
                 break
             except (httpx.ReadError, httpx.RemoteProtocolError) as exc:
                 if attempt < retries:
@@ -372,10 +378,10 @@ async def api_recognize(
         raise HTTPException(status_code=400, detail="docType must be one of idcard/vehicle_license/driver_license/handwriting")
 
     content = await file.read()
-    files = {"file": (file.filename or "upload.jpg", content, file.content_type or "application/octet-stream")}
+    json_body = _ocr_json_body_from_bytes(content)
     try:
         async with httpx.AsyncClient(timeout=_ocr_upstream_timeout()) as client:
-            resp = await client.post(target, files=files)
+            resp = await client.post(target, json=json_body)
             if resp.status_code >= 400:
                 raise HTTPException(status_code=502, detail=_ocr_upstream_error_detail(resp))
             return resp.json()
@@ -417,8 +423,8 @@ async def api_batch_run(req: BatchRequest):
         for img in to_process:
             try:
                 with img.open("rb") as f:
-                    files = {"file": (img.name, f.read(), "application/octet-stream")}
-                resp = await client.post(target, files=files)
+                    json_body = _ocr_json_body_from_bytes(f.read())
+                resp = await client.post(target, json=json_body)
                 if resp.status_code >= 400:
                     failed.append({"file": img.name, "error": resp.text[:500]})
                     continue
