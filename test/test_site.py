@@ -57,28 +57,36 @@ def _read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _html_page(name: str) -> HTMLResponse:
+    """静态页统一 UTF-8，避免浏览器按系统默认编码误判。"""
+    return HTMLResponse(
+        content=_read_text(_page_path(name)),
+        media_type="text/html; charset=utf-8",
+    )
+
+
 def _image_url(doc_type: str, filename: str) -> str:
     return f"/api/image/{doc_type}/{filename}"
 
 
 @app.get("/", response_class=HTMLResponse)
-def home() -> str:
-    return _read_text(_page_path("index.html"))
+def home() -> HTMLResponse:
+    return _html_page("index.html")
 
 
 @app.get("/batch/idcard", response_class=HTMLResponse)
-def page_idcard() -> str:
-    return _read_text(_page_path("batch_idcard.html"))
+def page_idcard() -> HTMLResponse:
+    return _html_page("batch_idcard.html")
 
 
 @app.get("/batch/vehicle_license", response_class=HTMLResponse)
-def page_vehicle() -> str:
-    return _read_text(_page_path("batch_vehicle_license.html"))
+def page_vehicle() -> HTMLResponse:
+    return _html_page("batch_vehicle_license.html")
 
 
 @app.get("/batch/driver_license", response_class=HTMLResponse)
-def page_driver() -> str:
-    return _read_text(_page_path("batch_driver_license.html"))
+def page_driver() -> HTMLResponse:
+    return _html_page("batch_driver_license.html")
 
 
 @app.get("/api/image/{doc_type}/{filename}")
