@@ -39,7 +39,8 @@
 
 版本一致性关键点：
 - Python 主版本必须匹配 wheel 标签（如 `cp313`）。
-- 离线安装优先用 `offline_bundle/wheels/requirements-lock.txt` 保证可复现。
+- 离线安装优先用 `offline_bundle/wheels/requirements-lock.txt` 保证可复现；清单已包含 `paddlepaddle==3.3.1` 及其传递依赖，与根目录 `requirements.txt` 一致。
+- 外网打包：`scripts/prepare_offline_assets.ps1` 按锁定清单下载 wheels，并额外把 Paddle CPU 栈下载到 `offline_bundle/paddle/`（兼容「两步安装」）。
 
 ## 6. 文档地图（按用途）
 - `README.md`：总览与快速入口

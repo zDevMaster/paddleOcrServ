@@ -2,6 +2,8 @@ fastapi
 uvicorn[standard]
 gunicorn
 python-multipart
+# PaddleOCR 运行时必须安装（CPU）；版本与 offline_bundle 及 服务器部署.md 保持一致
+paddlepaddle==3.3.1
 paddleocr
 opencv-python-headless
 numpy

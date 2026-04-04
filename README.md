@@ -143,7 +143,7 @@ cd E:\paddleOcr
 .\scripts\prepare_offline_assets.ps1 -PythonExe python -PaddleVersion 3.3.1
 ```
 
-执行后会把依赖 wheel、Paddle CPU wheel、PaddleOCR 模型下载到 `offline_bundle` 对应目录。
+执行后会把 **锁定清单中的全部 wheel**（含 `paddlepaddle` 及 OCR 依赖）、**Paddle CPU 栈（写入 `offline_bundle/paddle`）**、PaddleOCR 模型下载到 `offline_bundle` 对应目录。内网安装命令见 [服务器部署.md](服务器部署.md) 第 3 节。
 
 ### 10.1 固定 Python 与依赖版本
 建议先生成锁定文件，避免内网安装时版本漂移：
@@ -205,11 +205,12 @@ cd E:\paddleOcr
 python -m venv .venv
 .venv\Scripts\activate
 
-# 先安装 Paddle（CPU，版本与 offline_bundle\paddle 中文件一致）
-pip install --no-index --find-links .\offline_bundle\paddle paddlepaddle==3.3.1
+# 推荐：一条命令（锁定清单已含 paddlepaddle 及传递依赖；双 find-links 覆盖 paddle/ 与 wheels/）
+pip install --no-index --find-links .\offline_bundle\paddle --find-links .\offline_bundle\wheels -r .\offline_bundle\wheels\requirements-lock.txt
 
-# 再安装项目依赖（与干净环境锁定一致）
-pip install --no-index --find-links .\offline_bundle\wheels -r .\offline_bundle\wheels\requirements-lock.txt
+# 或分两步：先装 Paddle CPU，再装锁定清单（第二步请保留双 find-links，见 服务器部署.md）
+# pip install --no-index --find-links .\offline_bundle\paddle paddlepaddle==3.3.1
+# pip install --no-index --find-links .\offline_bundle\paddle --find-links .\offline_bundle\wheels -r .\offline_bundle\wheels\requirements-lock.txt
 
 # 启动（Windows）
 .\startup.bat
