@@ -28,11 +28,12 @@
 
 ---
 
-## 2. 通用 DTO 与调用客户端（同步 + 物理路径上传）
+## 2. 通用 DTO 与调用客户端（同步；**推荐：文件 → Base64 → JSON**）
 
 约定：
 
-- 识别请求使用 **`multipart/form-data` + 本地文件路径**（`File.OpenRead`），**不**再走 `imageBase64` JSON。
+- **身份证、行驶证、驾驶证、手写等证件/业务识别**：请先将**图片文件读入字节**，再 **`Convert.ToBase64String`**，以 **`application/json`** 提交 `{ "imageBase64": "..." }` 到对应路径（**不要**带 `data:image/...;base64,` 前缀，与微服务 `ImageJsonRequest` 一致）。
+- **亦可**使用 **`multipart/form-data`** 直接上传文件字段 `file`（见下文 `PostDocumentByFile` / `PostGeneralByFile`），与 JSON 二选一即可。
 - 公开方法为**同步**（无 `async`/`await`）；内部可用 `HttpClient.Send`（**.NET 5+**）或 `SendAsync(...).GetAwaiter().GetResult()`（**.NET Framework**）。
 - **`OcrHttpClient`**：构造时若传入**系统已注册/单例的 `HttpClient`**（如 DI），则**直接使用**；若未传入，则类内使用**进程级单例** `HttpClient`（懒创建、全进程复用），**无需**在 `Application_Start` 里单独初始化客户端类型本身。
 
@@ -163,7 +164,57 @@ public class OcrHttpClient
         return new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
     }
 
-    /// <summary>证件类：docType 为 idcard / vehicle_license / driver_license 等。</summary>
+    /// <summary>证件类（推荐）：JSON + Base64，与 multipart 二选一。</summary>
+    public OcrResponseDto PostDocumentByBase64(string docType, string imageBase64)
+    {
+        if (string.IsNullOrWhiteSpace(imageBase64))
+            throw new ArgumentException("imageBase64 不能为空", nameof(imageBase64));
+
+        var url = $"{_baseUrl}/v1/ocr/document/{docType}";
+        var body = new { imageBase64 = imageBase64 };
+        var json = JsonConvert.SerializeObject(body);
+        using var req = new HttpRequestMessage(HttpMethod.Post, url)
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json"),
+        };
+        req.Headers.TryAddWithoutValidation("X-Trace-From", "iis-csharp-client");
+        return SendAndDeserialize(req);
+    }
+
+    /// <summary>从本地图片路径读取后转 Base64 再调用证件接口（与业务「先转 Base64 再提交」一致）。</summary>
+    public OcrResponseDto PostDocumentByFilePathBase64(string docType, string imageFilePath)
+    {
+        if (string.IsNullOrWhiteSpace(imageFilePath) || !File.Exists(imageFilePath))
+            throw new FileNotFoundException("图片文件不存在", imageFilePath);
+        var b64 = Convert.ToBase64String(File.ReadAllBytes(imageFilePath));
+        return PostDocumentByBase64(docType, b64);
+    }
+
+    /// <summary>通用 OCR（推荐）：JSON + Base64。</summary>
+    public OcrResponseDto PostGeneralByBase64(string imageBase64)
+    {
+        if (string.IsNullOrWhiteSpace(imageBase64))
+            throw new ArgumentException("imageBase64 不能为空", nameof(imageBase64));
+
+        var url = $"{_baseUrl}/v1/ocr/general";
+        var body = new { imageBase64 = imageBase64 };
+        var json = JsonConvert.SerializeObject(body);
+        using var req = new HttpRequestMessage(HttpMethod.Post, url)
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json"),
+        };
+        return SendAndDeserialize(req);
+    }
+
+    public OcrResponseDto PostGeneralByFilePathBase64(string imageFilePath)
+    {
+        if (string.IsNullOrWhiteSpace(imageFilePath) || !File.Exists(imageFilePath))
+            throw new FileNotFoundException("图片文件不存在", imageFilePath);
+        var b64 = Convert.ToBase64String(File.ReadAllBytes(imageFilePath));
+        return PostGeneralByBase64(b64);
+    }
+
+    /// <summary>证件类（可选）：multipart 直传文件，无需事先 Base64。</summary>
     public OcrResponseDto PostDocumentByFile(string docType, string imageFilePath)
     {
         if (string.IsNullOrWhiteSpace(imageFilePath) || !File.Exists(imageFilePath))
@@ -182,7 +233,7 @@ public class OcrHttpClient
         return SendAndDeserialize(req);
     }
 
-    /// <summary>通用 OCR：/v1/ocr/general</summary>
+    /// <summary>通用 OCR（可选）：multipart 直传文件。</summary>
     public OcrResponseDto PostGeneralByFile(string imageFilePath)
     {
         if (string.IsNullOrWhiteSpace(imageFilePath) || !File.Exists(imageFilePath))
@@ -221,23 +272,27 @@ public class OcrHttpClient
 // Startup / Program 中已配置单例 HttpClient 时
 var apiHttp = serviceProvider.GetRequiredService<HttpClient>();
 var ocr = new OcrHttpClient("http://127.0.0.1:8000", apiHttp);
-var id = ocr.PostDocumentByFile("idcard", @"G:\data\a.jpg");
+var id = ocr.PostDocumentByFilePathBase64("idcard", @"G:\data\a.jpg");
 ```
 
 未传入第二个参数时，`OcrHttpClient` 内部使用**静态懒加载单例** `HttpClient`，同样避免“每请求 new 一个 `HttpClient`”。
 
 ---
 
-## 2.2（附录）JSON + `imageBase64` 调用方式
+## 2.2 JSON 请求体说明（与微服务一致）
 
-服务端仍支持 `POST` JSON + `imageBase64`（见 `README`）。若必须从内存传图再调用，可自行封装 `StringContent` + `application/json`；**本文主流程已改为物理路径 + multipart，不再展开 base64 示例。**
+- 字段名：**`imageBase64`**（纯 Base64 字符串，**无** Data URL 前缀）。
+- 可选：**`docType`**、**`options`**（如 `maxEdge`），与 `README` / `ImageJsonRequest` 一致；证件路由已由 URL 中的 `document/{doc_type}` 指定，`docType` 可省略。
+
+大文件时注意 IIS / `web.config` 的 `maxRequestLength` 与 ASP.NET Core 的 `MultipartBodyLengthLimit`（若走 multipart）；**纯 JSON + Base64** 时同样需放宽 **`maxJsonLength`**（如 Newtonsoft）或 Kestrel 请求体上限。
 
 ---
 
 ## 3. 对接你的实体（示例映射代码）
 
 > 以下示例使用你给出的实体：`zOcrRes_IdentyCard`、`zOcrRes_VehicleLicense`、`zOcrRes_DrivingLicense`、`zOcrRes_HandWriting`  
-> 参数 **`imageFilePath`**：图片在本机上的完整路径，例如 `G:\share\ocr\in\idcard_001.jpg`。
+> 参数 **`imageFilePath`**：图片在本机上的完整路径，例如 `G:\share\ocr\in\idcard_001.jpg`。  
+> 识别时由 `PostDocumentByFilePathBase64` / `PostGeneralByFilePathBase64` **内部**执行 `File.ReadAllBytes` → `Convert.ToBase64String` 后再 `POST` JSON；若图中已在内存，可改调 **`PostDocumentByBase64`** / **`PostGeneralByBase64`**。
 
 可在业务类中持有**一个** `OcrHttpClient` 字段（构造时传入 `HttpClient` 或省略），识别方法均为**同步**。
 
@@ -247,7 +302,7 @@ var id = ocr.PostDocumentByFile("idcard", @"G:\data\a.jpg");
 public zOcrRes_IdentyCard RecognizeIdCard(string imageFilePath, string logKey)
 {
     var client = new OcrHttpClient("http://127.0.0.1:8000"); // 或注入 HttpClient: new OcrHttpClient(baseUrl, _httpClient)
-    var resp = client.PostDocumentByFile("idcard", imageFilePath);
+    var resp = client.PostDocumentByFilePathBase64("idcard", imageFilePath);
     if (resp == null || !resp.Success) throw new Exception($"OCR失败，traceId={resp?.TraceId}");
 
     var f = resp.Data?.Fields ?? new Dictionary<string, OcrFieldDto>();
@@ -271,7 +326,7 @@ public zOcrRes_IdentyCard RecognizeIdCard(string imageFilePath, string logKey)
 public zOcrRes_VehicleLicense RecognizeVehicleLicense(string imageFilePath, string logKey)
 {
     var client = new OcrHttpClient("http://127.0.0.1:8000");
-    var resp = client.PostDocumentByFile("vehicle_license", imageFilePath);
+    var resp = client.PostDocumentByFilePathBase64("vehicle_license", imageFilePath);
     if (resp == null || !resp.Success) throw new Exception($"OCR失败，traceId={resp?.TraceId}");
 
     var f = resp.Data?.Fields ?? new Dictionary<string, OcrFieldDto>();
@@ -300,7 +355,7 @@ public zOcrRes_VehicleLicense RecognizeVehicleLicense(string imageFilePath, stri
 public zOcrRes_DrivingLicense RecognizeDrivingLicense(string imageFilePath, string logKey)
 {
     var client = new OcrHttpClient("http://127.0.0.1:8000");
-    var resp = client.PostDocumentByFile("driver_license", imageFilePath);
+    var resp = client.PostDocumentByFilePathBase64("driver_license", imageFilePath);
     if (resp == null || !resp.Success) throw new Exception($"OCR失败，traceId={resp?.TraceId}");
 
     var f = resp.Data?.Fields ?? new Dictionary<string, OcrFieldDto>();
@@ -329,7 +384,7 @@ public zOcrRes_DrivingLicense RecognizeDrivingLicense(string imageFilePath, stri
 public zOcrRes_HandWriting RecognizeHandWriting(string imageFilePath, string logKey)
 {
     var client = new OcrHttpClient("http://127.0.0.1:8000");
-    var resp = client.PostGeneralByFile(imageFilePath);
+    var resp = client.PostGeneralByFilePathBase64(imageFilePath);
     if (resp == null || !resp.Success) throw new Exception($"OCR失败，traceId={resp?.TraceId}");
 
     var f = resp.Data?.Fields ?? new Dictionary<string, OcrFieldDto>();
@@ -369,6 +424,6 @@ var dto = RecognizeIdCard(@"G:\ocr\in\id.jpg", "OCR-LOG-20260327-0001");
 2) 日期解析失败怎么办？  
 - 先看原始字符串，再做二次兼容解析；示例里已提供 `GetDate` 兜底解析。
 
-3) 必须用物理路径吗？  
-- 本文主流程为 **`multipart` 文件上传**（`imageFilePath`）。若只能从内存传图，请改用服务端支持的 JSON + `imageBase64`（见附录 2.2）。
+3) 必须用 Base64 吗？  
+- **本文推荐流程**为：读本地文件 → Base64 → JSON（`PostDocumentByFilePathBase64` 等）。若希望少一次编码，可直接使用 **`PostDocumentByFile`** / **`PostGeneralByFile`**（`multipart` 上传），微服务两种都支持。
 
