@@ -34,7 +34,7 @@
 
 ## 2.1 日志文件（`app/logs/`）
 
-- **`{YYYY-MM-DD}_base.log`**：与 **uvicorn 终端** 同类的服务/访问日志（启动信息、HTTP 访问行等）。
+- **`uvicorn.log`** / **`access.log`**：由启动参数 **`--log-config uvicorn_log_config.json`** 写入，内容分别对应 uvicorn 主日志与访问日志（与控制台同类）。
 - **`{YYYY-MM-DD}_{handwriting|idcard|vehicle_license|driver_license}.log`**：按识别类型汇总的业务识别成功/失败摘要（与 `recognition_log` 一致）。
 
 ## 3. 请求方式

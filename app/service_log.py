@@ -1,4 +1,4 @@
-"""将 uvicorn 终端同类信息写入 app/logs/{YYYY-MM-DD}_base.log（按日切分）。"""
+"""旧版：运行时向 uvicorn logger 挂载文件 Handler。已改为在 uvicorn_log_config.json 中用 FileHandler 写 app/logs/，勿在应用 import 阶段调用 install_uvicorn_file_mirror。"""
 from __future__ import annotations
 
 import logging

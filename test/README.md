@@ -9,7 +9,7 @@
 - `site/batch_vehicle_license.html`：行驶证批量测试页
 - `site/batch_driver_license.html`：驾驶证批量测试页
 - `site/batch_handwriting.html`：手写签名画布 → 保存 `HandWrite/{纳秒tick}.png` + 识别 `json`
-- `start_test_site.bat`：启动测试网站（默认监听 `0.0.0.0:9000`，本机与局域网均可访问；仅本机可设 `TEST_SITE_HOST=127.0.0.1`；终端日志使用项目根目录 `uvicorn_log_config.json` 带**时间戳**）
+- `start_test_site.bat`：启动测试网站（默认监听 `0.0.0.0:9000`，本机与局域网均可访问；仅本机可设 `TEST_SITE_HOST=127.0.0.1`；日志配置为项目根 `uvicorn_log_config.json`；bat 会将仓库根加入 `PYTHONPATH`，否则 `test` 目录下启动时无法解析日志中的自定义 Handler）
 - 测试站**转发 OCR 微服务**时使用 **`application/json` + `imageBase64`**（与 C# 示例、`ImageJsonRequest` 一致）；浏览器到测试站仍可为表单/文件上传，由服务端读字节后编码
 - 测试站调用 OCR 的 HTTP 超时默认 **600s**（首请求会加载模型）；若仍超时可在运行测试站前设置环境变量 `OCR_UPSTREAM_TIMEOUT=1200`
 - 若出现 `ReadError`（对端关闭连接），手写提交会自动重试，次数由 **`OCR_POST_RETRIES`**（默认 `2`，即最多 3 次请求）、间隔 **`OCR_POST_RETRY_DELAY_SEC`**（默认 `2` 秒）控制
@@ -22,6 +22,8 @@
 cd /d E:\paddleOcr\test
 start_test_site.bat
 ```
+
+若手动执行 `uvicorn`（不用 bat），请在 **`test` 目录**下先设置 `set PYTHONPATH=..`，再运行与 bat 相同的命令，否则日志配置可能报错。
 
 浏览器打开：
 

@@ -3,6 +3,9 @@ setlocal EnableExtensions
 
 cd /d "%~dp0"
 
+REM uvicorn 在导入应用之前就会加载 --log-config；其中自定义 Handler 需能 import app.*，故将仓库根加入 PYTHONPATH
+set "PYTHONPATH=%~dp0..;%PYTHONPATH%"
+
 REM 默认 0.0.0.0：本机可用 127.0.0.1，局域网其它电脑可用本机 IP（如 192.168.x.x）。仅本机可设 TEST_SITE_HOST=127.0.0.1
 if not defined TEST_SITE_HOST set TEST_SITE_HOST=0.0.0.0
 if not defined TEST_SITE_PORT set TEST_SITE_PORT=9000

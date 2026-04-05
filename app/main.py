@@ -7,16 +7,7 @@ import uuid
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 
-from app.extractors import extract_by_doc_type, extract_handwriting
 from app.models import DocumentType, ImageJsonRequest, OcrResponse
-from app.ocr_engine import run_ocr
-from app.preprocess import (
-    decode_image_from_base64,
-    ensure_min_edge,
-    image_pipeline,
-    pad_white_border,
-    read_upload_bytes,
-)
 from app.recognition_log import (
     KIND_DRIVER_LICENSE,
     KIND_HANDWRITING,
@@ -25,7 +16,6 @@ from app.recognition_log import (
     log_error,
     log_success,
 )
-from app.service_log import install_uvicorn_file_mirror
 
 _DOC_KIND = {
     DocumentType.idcard: KIND_IDCARD,
@@ -41,6 +31,8 @@ app = FastAPI(title="Intranet OCR Service", version="1.0.0")
 
 
 async def _load_image_from_request(request: Request, file: UploadFile | None) -> tuple:
+    from app.preprocess import decode_image_from_base64, read_upload_bytes
+
     options = None
     if file is not None:
         content = await file.read()
@@ -59,6 +51,10 @@ async def _recognize_handwriting_from_request(
     file: UploadFile | None,
 ) -> tuple[dict, str]:
     """与 `/v1/ocr/document/handwriting` 相同：预处理 + 手写检测参数 + extract_handwriting。"""
+    from app.extractors import extract_handwriting
+    from app.ocr_engine import run_ocr
+    from app.preprocess import ensure_min_edge, image_pipeline, pad_white_border
+
     image, options = await _load_image_from_request(request, file)
     image = image_pipeline(image, options)
     min_edge = int(os.getenv("OCR_HANDWRITING_MIN_EDGE", "128"))
@@ -147,6 +143,10 @@ async def ocr_document(doc_type: DocumentType, request: Request, file: UploadFil
         if doc_type == DocumentType.handwriting:
             fields, text = await _recognize_handwriting_from_request(request, file)
         else:
+            from app.extractors import extract_by_doc_type
+            from app.ocr_engine import run_ocr
+            from app.preprocess import image_pipeline
+
             image, options = await _load_image_from_request(request, file)
             image = image_pipeline(image, options)
             lines = run_ocr(image, handwriting=False)
@@ -184,6 +184,3 @@ async def ocr_document(doc_type: DocumentType, request: Request, file: UploadFil
             status_code=500,
             detail=f"识别过程异常: {exc!s}",
         ) from exc
-
-
-install_uvicorn_file_mirror()
