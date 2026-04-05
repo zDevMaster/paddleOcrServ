@@ -99,7 +99,8 @@ exit /b %EXITCODE%
 
 echo [OCR] Profile: PP-OCRv4 mobile  (background)
 
-start "PaddleOCR-v4m" /MIN "%PYEXE%" -m uvicorn app.main:app --host %OCR_HOST% --port %OCR_PORT% --workers %OCR_WORKERS% --log-config "%~dp0uvicorn_log_config.json"
+REM start 默认工作目录常为 System32，必须 /D 指定项目根，否则找不到 app 包、/health 无法访问
+start "PaddleOCR-v4m" /D "%~dp0" /MIN "%PYEXE%" -m uvicorn app.main:app --host %OCR_HOST% --port %OCR_PORT% --workers %OCR_WORKERS% --log-config "%~dp0uvicorn_log_config.json"
 
 echo [OCR] 已后台启动。健康检查: http://127.0.0.1:%OCR_PORT%/health
 

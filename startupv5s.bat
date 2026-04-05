@@ -101,7 +101,7 @@ exit /b %EXITCODE%
 
 echo [OCR] Profile: PP-OCRv5 server  (background)
 
-start "PaddleOCR-v5s" /MIN "%PYEXE%" -m uvicorn app.main:app --host %OCR_HOST% --port %OCR_PORT% --workers %OCR_WORKERS% --log-config "%~dp0uvicorn_log_config.json"
+start "PaddleOCR-v5s" /D "%~dp0" /MIN "%PYEXE%" -m uvicorn app.main:app --host %OCR_HOST% --port %OCR_PORT% --workers %OCR_WORKERS% --log-config "%~dp0uvicorn_log_config.json"
 
 echo [OCR] 已后台启动。健康检查: http://127.0.0.1:%OCR_PORT%/health
 
