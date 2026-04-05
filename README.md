@@ -32,6 +32,11 @@
 - `vehicle_license`
 - `handwriting`（与 **`/v1/ocr/general`** 等价，见上）
 
+## 2.1 日志文件（`app/logs/`）
+
+- **`{YYYY-MM-DD}_base.log`**：与 **uvicorn 终端** 同类的服务/访问日志（启动信息、HTTP 访问行等）。
+- **`{YYYY-MM-DD}_{handwriting|idcard|vehicle_license|driver_license}.log`**：按识别类型汇总的业务识别成功/失败摘要（与 `recognition_log` 一致）。
+
 ## 3. 请求方式
 
 ### A. multipart/form-data（推荐）

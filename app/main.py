@@ -25,6 +25,7 @@ from app.recognition_log import (
     log_error,
     log_success,
 )
+from app.service_log import install_uvicorn_file_mirror
 
 _DOC_KIND = {
     DocumentType.idcard: KIND_IDCARD,
@@ -184,3 +185,5 @@ async def ocr_document(doc_type: DocumentType, request: Request, file: UploadFil
             detail=f"识别过程异常: {exc!s}",
         ) from exc
 
+
+install_uvicorn_file_mirror()

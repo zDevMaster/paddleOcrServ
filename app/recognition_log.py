@@ -1,4 +1,4 @@
-"""按识别类型、按日写入 app/logs/<类型>_YYYY-MM-DD.log，仅记录成功结果与错误。"""
+"""按识别类型、按日写入 app/logs/{YYYY-MM-DD}_{类型}.log，仅记录成功结果与错误。"""
 from __future__ import annotations
 
 import json
@@ -24,7 +24,7 @@ def _today_str() -> str:
 
 
 def _log_path(kind: str) -> Path:
-    return LOG_DIR / f"{kind}_{_today_str()}.log"
+    return LOG_DIR / f"{_today_str()}_{kind}.log"
 
 
 def _append_line(kind: str, line: str) -> None:
