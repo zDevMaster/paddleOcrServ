@@ -22,7 +22,7 @@
 健康检查。
 
 ### `POST /v1/ocr/general`
-通用 OCR（手写/印刷都可），返回原始行结果 + 全文/行文本/平均置信度。
+通用手写/签名类 OCR：与下方 **`handwriting`** 为**同一套处理与抽取逻辑**，返回 `data.docType` 均为 **`handwriting`**（全文 / 行文本 / 置信度等字段一致）。仅路径不同，任选其一即可。
 
 ### `POST /v1/ocr/document/{doc_type}`
 证件 OCR（结构化字段 + 原始 OCR + 校验 + 质量）  
@@ -30,7 +30,7 @@
 - `idcard`
 - `driver_license`
 - `vehicle_license`
-- `handwriting`（可选）
+- `handwriting`（与 **`/v1/ocr/general`** 等价，见上）
 
 ## 3. 请求方式
 

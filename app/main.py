@@ -33,6 +33,9 @@ _DOC_KIND = {
     DocumentType.handwriting: KIND_HANDWRITING,
 }
 
+# `/v1/ocr/general` 与 `/v1/ocr/document/handwriting` 共用同一套流水线，响应 data.docType 统一为该值。
+HANDWRITING_RESPONSE_DOC_TYPE = "handwriting"
+
 app = FastAPI(title="Intranet OCR Service", version="1.0.0")
 
 
@@ -48,6 +51,22 @@ async def _load_image_from_request(request: Request, file: UploadFile | None) ->
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"invalid request body: {exc}") from exc
     return decode_image_from_base64(payload.imageBase64), payload.options
+
+
+async def _recognize_handwriting_from_request(
+    request: Request,
+    file: UploadFile | None,
+) -> tuple[dict, str]:
+    """与 `/v1/ocr/document/handwriting` 相同：预处理 + 手写检测参数 + extract_handwriting。"""
+    image, options = await _load_image_from_request(request, file)
+    image = image_pipeline(image, options)
+    min_edge = int(os.getenv("OCR_HANDWRITING_MIN_EDGE", "128"))
+    image = ensure_min_edge(image, min_edge=min_edge)
+    pad = int(os.getenv("OCR_HANDWRITING_PAD", "28"))
+    image = pad_white_border(image, margin=pad)
+    lines = run_ocr(image, handwriting=True)
+    fields, _, _, text = extract_handwriting(lines)
+    return fields, text
 
 
 def _build_response(
@@ -81,23 +100,15 @@ async def ocr_general(request: Request, file: UploadFile | None = File(default=N
     kind = KIND_HANDWRITING
 
     try:
-        image, options = await _load_image_from_request(request, file)
-        image = image_pipeline(image, options)
-        min_edge = int(os.getenv("OCR_HANDWRITING_MIN_EDGE", "128"))
-        image = ensure_min_edge(image, min_edge=min_edge)
-        pad = int(os.getenv("OCR_HANDWRITING_PAD", "28"))
-        image = pad_white_border(image, margin=pad)
-
-        lines = run_ocr(image, handwriting=True)
-        fields, _, _, text = extract_handwriting(lines)
+        fields, text = await _recognize_handwriting_from_request(request, file)
         elapsed = int((time.perf_counter() - started) * 1000)
         log_success(
             kind,
             trace_id,
             elapsed,
-            {"docType": "general", "text": text, "fields": fields},
+            {"docType": HANDWRITING_RESPONSE_DOC_TYPE, "text": text, "fields": fields},
         )
-        return _build_response(trace_id, elapsed, "general", fields, text)
+        return _build_response(trace_id, elapsed, HANDWRITING_RESPONSE_DOC_TYPE, fields, text)
     except HTTPException as exc:
         elapsed = int((time.perf_counter() - started) * 1000)
         log_error(
@@ -132,17 +143,13 @@ async def ocr_document(doc_type: DocumentType, request: Request, file: UploadFil
     kind = _DOC_KIND[doc_type]
 
     try:
-        image, options = await _load_image_from_request(request, file)
-        image = image_pipeline(image, options)
-        hw = doc_type == DocumentType.handwriting
-        if hw:
-            min_edge = int(os.getenv("OCR_HANDWRITING_MIN_EDGE", "128"))
-            image = ensure_min_edge(image, min_edge=min_edge)
-            pad = int(os.getenv("OCR_HANDWRITING_PAD", "28"))
-            image = pad_white_border(image, margin=pad)
-
-        lines = run_ocr(image, handwriting=hw)
-        fields, _, _, text = extract_by_doc_type(doc_type, lines)
+        if doc_type == DocumentType.handwriting:
+            fields, text = await _recognize_handwriting_from_request(request, file)
+        else:
+            image, options = await _load_image_from_request(request, file)
+            image = image_pipeline(image, options)
+            lines = run_ocr(image, handwriting=False)
+            fields, _, _, text = extract_by_doc_type(doc_type, lines)
         elapsed = int((time.perf_counter() - started) * 1000)
         log_success(
             kind,
