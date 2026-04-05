@@ -3,12 +3,15 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
-from paddleocr import PaddleOCR
 
 # 部分环境下 Paddle 3.x + oneDNN 推理会触发未实现分支；在 import paddle 之前设置最稳妥。
 os.environ.setdefault("FLAGS_use_mkldnn", "0")
+
+if TYPE_CHECKING:
+    from paddleocr import PaddleOCR
 
 
 def _resolve_path(env_name: str, fallback_relative: str) -> str:
@@ -26,14 +29,18 @@ def _assert_paddlex_infer_dir(path: str) -> None:
 
 
 @lru_cache(maxsize=1)
-def get_ocr_engine() -> PaddleOCR:
+def get_ocr_engine() -> "PaddleOCR":
     """PaddleOCR 3.x（PaddleX）：须使用带 inference.yml 的官方推理目录，见 offline_bundle/models/。
+
+    **不在模块顶层 import paddleocr**，避免阻塞 uvicorn 绑定端口；首次识别时再加载（/health 可立刻响应）。
 
     模型由环境变量选择（与 startupV4m.bat / startupv5m.bat / startupv5s.bat 一致）：
     - ``OCR_DET_MODEL_NAME`` / ``OCR_REC_MODEL_NAME``：PaddleX 模型名，如 ``PP-OCRv5_server_det``。
     - ``OCR_DET_MODEL_DIR`` / ``OCR_REC_MODEL_DIR``：推理目录；未设置时默认为
       ``offline_bundle/models/<模型名>_infer``。
     """
+    from paddleocr import PaddleOCR
+
     det_name = os.getenv("OCR_DET_MODEL_NAME", "PP-OCRv5_server_det").strip()
     rec_name = os.getenv("OCR_REC_MODEL_NAME", "PP-OCRv5_server_rec").strip()
     det_dir = _resolve_path("OCR_DET_MODEL_DIR", f"offline_bundle/models/{det_name}_infer")
