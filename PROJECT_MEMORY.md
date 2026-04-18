@@ -35,7 +35,9 @@
 - `offline_bundle/paddle/`：Paddle CPU 及依赖 wheel
 - `offline_bundle/wheels/`：项目依赖离线 wheel（含 `requirements-lock.txt`）
 - `offline_bundle/models/`：OCR 模型
+- `offline_bundle/README.txt`：离线目录简要说明
 - `安装程序/`：Python/VC++ 安装程序
+- 根目录 **`initServ.bat`**：内网拷贝后执行一次，自动创建 `.venv` 并用双 `--find-links` 离线安装锁定清单（不联网）
 
 版本一致性关键点：
 - Python 主版本必须匹配 wheel 标签（如 `cp313`）。
@@ -44,7 +46,7 @@
 
 ## 6. 文档地图（按用途）
 - `README.md`：总览与快速入口
-- `服务器部署.md`：内网拷贝清单、环境、`offline_bundle` 完整性（第 3 节）、离线 pip（第 4 节）、启动、任务计划（第 6 节）、常见问题
+- `服务器部署.md`：内网拷贝清单、环境、`offline_bundle` 完整性（第 3 节）、**`initServ.bat` 一键初始化**与手动离线 pip（第 4 节）、启动、任务计划（第 6 节）、常见问题
 - `CSharp-IIS-调用示例.md`：C# DTO 映射与 base64 调用示例
 - `test/README.md`：测试网站与批量测试说明
 
