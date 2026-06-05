@@ -5,7 +5,6 @@ import base64
 import json
 import logging
 import os
-import sys
 import time
 from pathlib import Path
 
@@ -153,23 +152,16 @@ def _json_path_for(img_path: Path) -> Path:
     return img_path.with_suffix(".json")
 
 
-def _image_creation_time(p: Path) -> float:
-    """图片文件「创建时间」用于列表倒序（新在前）。
-
-    Windows：`st_ctime` 为创建时间。
-    Linux/macOS：优先 `st_birthtime`（若有），否则退回 `st_mtime`。
-    """
-    st = p.stat()
-    if sys.platform == "win32":
-        return float(st.st_ctime)
-    return float(getattr(st, "st_birthtime", st.st_mtime))
-
-
 def _image_files(folder: Path) -> list[Path]:
+    """列出目录下图片，按文件名（不区分大小写）升序，供列表展示与批量测试共用同一顺序。"""
     files = [p for p in folder.iterdir() if p.is_file() and p.suffix.lower() in IMAGE_EXTS]
-    # 按图片创建时间倒序；同名 secondary 保证稳定
-    files.sort(key=lambda p: (-_image_creation_time(p), p.name.lower()))
+    files.sort(key=lambda p: p.name.lower())
     return files
+
+
+def _pending_images(folder: Path) -> list[Path]:
+    """尚未生成同名 .json 的图片，顺序与 ``_image_files`` 一致（按文件名）。"""
+    return [p for p in _image_files(folder) if not _json_path_for(p).exists()]
 
 
 def _page_path(name: str) -> Path:
@@ -410,7 +402,7 @@ async def api_batch_run(req: BatchRequest):
 
     folder = _doc_folder(doc_type)
     images = _image_files(folder)
-    pending = [p for p in images if not _json_path_for(p).exists()]
+    pending = _pending_images(folder)
     to_process = pending[:batch_size]
 
     if doc_type == "handwriting":

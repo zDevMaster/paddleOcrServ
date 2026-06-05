@@ -93,3 +93,18 @@ def image_pipeline(image: np.ndarray, options: dict[str, Any] | None = None) -> 
     max_edge = int(options.get("maxEdge", 1600))
     return resize_max_edge(image, max_edge=max_edge)
 
+
+def idcard_image_pipeline(image: np.ndarray, options: dict[str, Any] | None = None) -> np.ndarray:
+    """身份证等证件扫描件：缩放后转灰度、CLAHE 增强对比度并轻锐化，提高低对比/偏色图的 OCR 识别率。"""
+    options = options or {}
+    if options.get("skipEnhance"):
+        return image_pipeline(image, options)
+    img = image_pipeline(image, options)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    enhanced = clahe.apply(gray)
+    enhanced = cv2.bilateralFilter(enhanced, d=5, sigmaColor=50, sigmaSpace=50)
+    blur = cv2.GaussianBlur(enhanced, (0, 0), 1.0)
+    sharpened = cv2.addWeighted(enhanced, 1.35, blur, -0.35, 0)
+    return cv2.cvtColor(sharpened, cv2.COLOR_GRAY2BGR)
+

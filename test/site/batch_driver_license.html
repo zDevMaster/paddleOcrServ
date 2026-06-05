@@ -11,12 +11,16 @@
     .top{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:12px;margin-bottom:12px}
     .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
     input,select,button{height:36px;padding:4px 10px}
-    .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
     .panel{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:10px}
-    .imgbox{height:360px;display:flex;align-items:center;justify-content:center;background:#111827}
-    .imgbox img{max-width:100%;max-height:100%;object-fit:contain}
-    pre{height:360px;overflow:auto;background:#0b1020;color:#d1e7ff;padding:10px;border-radius:8px}
-    .pager{display:flex;gap:8px;align-items:center;margin-top:8px}
+    .result-panel{width:100%;max-width:none}
+    .result-list{display:flex;flex-direction:column;gap:10px}
+    .result-row{display:grid;grid-template-columns:450px 1fr;gap:14px;border:1px solid #e5e7eb;border-radius:8px;padding:10px;background:#fafafa;align-items:start}
+    @media (max-width:960px){ .result-row{grid-template-columns:1fr} }
+    .result-row .thumb-wrap{box-sizing:border-box;min-width:450px;min-height:450px;width:450px;height:450px;display:flex;align-items:center;justify-content:center;background:#111827;border-radius:6px;padding:8px;overflow:hidden}
+    .result-row .thumb-wrap img{display:block;max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain}
+    .result-row .meta{font-size:13px;color:#334155;margin-bottom:6px;word-break:break-all}
+    .result-row pre{margin:0;white-space:pre-wrap;word-break:break-word;background:#0b1020;color:#d1e7ff;padding:8px;border-radius:6px;font-size:11px}
+    .page-nav{display:flex;gap:8px;align-items:center;margin-top:10px;padding-top:10px;border-top:1px solid #e5e7eb;flex-wrap:wrap}
   </style>
 </head>
 <body>
@@ -49,79 +53,116 @@
     </div>
   </div>
 
-  <div class="grid">
-    <div class="panel">
-      <h3>左侧：原始图片（含未识别）</h3>
-      <div id="fileName"></div>
-      <div class="imgbox"><img id="preview" alt="preview" /></div>
-      <div class="pager">
-        <button id="prev" type="button">上一张</button>
-        <span id="pos"></span>
-        <button id="next" type="button">下一张</button>
-      </div>
-    </div>
-    <div class="panel">
-      <h3>右侧：识别结果 JSON</h3>
-      <pre id="jsonBox">等待加载...</pre>
+  <div class="panel result-panel">
+    <h3 style="margin-top:0">查看结果（按「每页条数」列出本页全部记录）</h3>
+    <div id="resultList" class="result-list">等待加载...</div>
+    <div class="page-nav">
+      <button id="pagePrev" type="button">上一页</button>
+      <span id="pageInfo"></span>
+      <button id="pageNext" type="button">下一页</button>
     </div>
   </div>
 
   <script>
     const DOC_TYPE = "driver_license";
-    let currentPage = 1, currentIndex = 0, lastData = null;
+    let currentPage = 1, lastData = null;
     let mediaBust = Date.now();
-    const $ = (id)=>document.getElementById(id);
+    const $ = (id) => document.getElementById(id);
+
     function totalPages(data) {
       if (!data || !data.total) return 1;
       const ps = data.pageSize || 20;
       return Math.max(1, Math.ceil(data.total / ps));
     }
-    function imgSrc(url) {
-      const u = String(url);
-      return u + (u.includes("?") ? "&" : "?") + "v=" + mediaBust;
+
+    function escapeHtml(s) {
+      return String(s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
     }
-    async function health(){ const base=$("ocrBase").value.trim(); const r=await fetch(`/api/health?ocrBase=${encodeURIComponent(base)}`); alert(JSON.stringify(await r.json())); }
-    function formatApiErr(d){
-      if(!d||d.detail==null) return "";
-      const x=d.detail;
-      if(typeof x==="string") return x;
-      if(Array.isArray(x)) return x.map(e=>e.msg!=null?e.msg:JSON.stringify(e)).join(" ");
+
+    async function health() {
+      const base = $("ocrBase").value.trim();
+      const r = await fetch(`/api/health?ocrBase=${encodeURIComponent(base)}`);
+      alert(JSON.stringify(await r.json()));
+    }
+
+    function formatApiErr(d) {
+      if (!d || d.detail == null) return "";
+      const x = d.detail;
+      if (typeof x === "string") return x;
+      if (Array.isArray(x)) return x.map((e) => (e.msg != null ? e.msg : JSON.stringify(e))).join(" ");
       return String(x);
     }
-    async function runBatch(){
-      $("runInfo").textContent="执行中...";
-      const payload={docType:DOC_TYPE,batchSize:parseInt($("batchSize").value,10),ocrBase:$("ocrBase").value.trim()};
-      const r=await fetch("/api/batch/run",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+
+    async function runBatch() {
+      $("runInfo").textContent = "执行中...";
+      const payload = { docType: DOC_TYPE, batchSize: parseInt($("batchSize").value, 10), ocrBase: $("ocrBase").value.trim() };
+      const r = await fetch("/api/batch/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       let d;
-      try{ d=await r.json(); } catch { $("runInfo").textContent="批量失败: HTTP "+r.status; return; }
-      if(!r.ok){ $("runInfo").textContent="批量失败: "+(formatApiErr(d)||r.status); return; }
-      $("runInfo").textContent=`已处理 ${d.processedCount}，失败 ${d.failedCount}，剩余 ${d.pendingAfterRun}`;
+      try {
+        d = await r.json();
+      } catch {
+        $("runInfo").textContent = "批量失败: HTTP " + r.status;
+        return;
+      }
+      if (!r.ok) {
+        $("runInfo").textContent = "批量失败: " + (formatApiErr(d) || r.status);
+        return;
+      }
+      $("runInfo").textContent = `已处理 ${d.processedCount}，失败 ${d.failedCount}，剩余 ${d.pendingAfterRun}`;
       await loadPage(1);
     }
-    async function loadPage(page){
+
+    async function loadPage(page) {
       currentPage = Math.max(1, page);
-      const size=parseInt($("pageSize").value,10);
-      const r=await fetch(`/api/batch/results?docType=${DOC_TYPE}&page=${currentPage}&pageSize=${size}`, { cache: "no-store" });
-      lastData=await r.json();
-      const tp = totalPages(lastData);
-      if (currentPage > tp) { currentPage = tp; return loadPage(currentPage); }
+      const size = parseInt($("pageSize").value, 10);
+      const r = await fetch(`/api/batch/results?docType=${DOC_TYPE}&page=${currentPage}&pageSize=${size}`, { cache: "no-store" });
+      lastData = await r.json();
       mediaBust = Date.now();
-      currentIndex=0;
-      $("stats").textContent=`总数:${lastData.total} 已识别 ${lastData.recognized} 未识别 ${lastData.unrecognized} 第 ${lastData.page}/${tp} 页`;
-      renderItem();
+      const tp = totalPages(lastData);
+      if (currentPage > tp) {
+        currentPage = tp;
+        return loadPage(currentPage);
+      }
+      $("stats").textContent = `总数:${lastData.total} 已识别 ${lastData.recognized} 未识别 ${lastData.unrecognized} 第 ${lastData.page}/${tp} 页`;
+      renderResultList();
     }
-    function renderItem(){
-      const items=(lastData&&lastData.items)||[];
-      if(items.length===0){ $("fileName").textContent="当前页无数据"; $("preview").src=""; $("jsonBox").textContent=""; $("pos").textContent="0/0"; return; }
-      if(currentIndex<0) currentIndex=0; if(currentIndex>=items.length) currentIndex=items.length-1;
-      const it=items[currentIndex];
-      $("fileName").textContent=`${it.fileName} ${it.jsonExists?"[已识别]":"[未识别]"}`;
-      $("preview").src=imgSrc(it.imageUrl);
-      $("jsonBox").textContent=it.jsonExists?it.jsonText:"尚未生成 .json（未识别）";
-      $("pos").textContent=`${currentIndex+1}/${items.length}`;
+
+    function renderResultList() {
+      const box = $("resultList");
+      const items = (lastData && lastData.items) || [];
+      const tp = totalPages(lastData);
+      $("pageInfo").textContent = `第 ${lastData.page} / ${tp} 页（本页 ${items.length} 条）`;
+      $("pagePrev").disabled = lastData.page <= 1;
+      $("pageNext").disabled = lastData.page >= tp;
+
+      if (items.length === 0) {
+        box.textContent = "当前页无数据（请先将图片放入 test/data/DrivingLicense）";
+        return;
+      }
+      const q = (u) => (String(u).includes("?") ? "&" : "?");
+      box.innerHTML = items
+        .map(
+          (it) =>
+            `<div class="result-row">
+  <div class="thumb-wrap"><img src="${it.imageUrl}${q(it.imageUrl)}v=${mediaBust}" alt="" loading="lazy" /></div>
+  <div>
+    <div class="meta"><strong>${escapeHtml(it.fileName)}</strong> ${it.jsonExists ? "[已识别]" : "[未识别]"}</div>
+    <pre>${it.jsonExists ? escapeHtml(it.jsonText) : "尚未生成 .json（未识别）"}</pre>
+  </div>
+</div>`
+        )
+        .join("");
     }
-    $("btnHealth").onclick=health; $("btnRun").onclick=runBatch; $("btnLoad").onclick=()=>loadPage(currentPage);
-    $("prev").onclick=()=>{currentIndex--;renderItem();}; $("next").onclick=()=>{currentIndex++;renderItem();};
+
+    $("btnHealth").onclick = health;
+    $("btnRun").onclick = runBatch;
+    $("btnLoad").onclick = () => loadPage(currentPage);
+    $("pagePrev").onclick = () => loadPage(currentPage - 1);
+    $("pageNext").onclick = () => loadPage(currentPage + 1);
     $("pageSize").onchange = () => loadPage(1);
     loadPage(1);
   </script>
