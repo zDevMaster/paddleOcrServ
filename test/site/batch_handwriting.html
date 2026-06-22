@@ -22,7 +22,7 @@
     .result-row .thumb-wrap{box-sizing:border-box;min-width:450px;min-height:450px;width:450px;height:450px;display:flex;align-items:center;justify-content:center;background:#111827;border-radius:6px;padding:8px;overflow:hidden}
     .result-row .thumb-wrap img{display:block;max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain}
     .result-row .meta{font-size:13px;color:#334155;margin-bottom:6px;word-break:break-all}
-    .result-row pre{margin:0;white-space:pre-wrap;word-break:break-word;background:#0b1020;color:#d1e7ff;padding:8px;border-radius:6px;font-size:11px}
+    .result-row pre{margin:0;white-space:pre-wrap;word-break:break-word;background:#0b1020;color:#d1e7ff;padding:8px;border-radius:6px;font-size:14px}
     .pager{display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap}
     .page-nav{display:flex;gap:8px;align-items:center;margin-top:10px;padding-top:10px;border-top:1px solid #e5e7eb}
     #submitInfo{display:block;max-width:100%;line-height:1.55;word-break:break-word;color:#334155;font-size:14px}
@@ -251,9 +251,15 @@
       renderResultList();
     }
 
+    function sortItemsByFileName(items) {
+      return [...items].sort((a, b) =>
+        String(a.fileName).localeCompare(String(b.fileName), "zh-CN", { numeric: true, sensitivity: "base" })
+      );
+    }
+
     function renderResultList() {
       const box = $("resultList");
-      const items = (lastData && lastData.items) || [];
+      const items = sortItemsByFileName((lastData && lastData.items) || []);
       const tp = totalPages(lastData);
       $("pageInfo").textContent = `第 ${lastData.page} / ${tp} 页（本页 ${items.length} 条）`;
       $("pagePrev").disabled = lastData.page <= 1;

@@ -5,6 +5,7 @@ import base64
 import json
 import logging
 import os
+import re
 import time
 from pathlib import Path
 
@@ -152,10 +153,25 @@ def _json_path_for(img_path: Path) -> Path:
     return img_path.with_suffix(".json")
 
 
+_FILENAME_NATURAL_SPLIT = re.compile(r"(\d+)")
+
+
+def _natural_filename_key(name: str) -> tuple:
+    """文件名自然排序：数字段按数值比较，其余按小写字符串。"""
+    lower = name.lower()
+    parts = _FILENAME_NATURAL_SPLIT.split(lower)
+    key: list = []
+    for part in parts:
+        if not part:
+            continue
+        key.append(int(part) if part.isdigit() else part)
+    return tuple(key)
+
+
 def _image_files(folder: Path) -> list[Path]:
-    """列出目录下图片，按文件名（不区分大小写）升序，供列表展示与批量测试共用同一顺序。"""
+    """列出目录下图片，按文件名自然升序，供列表与批量测试共用。"""
     files = [p for p in folder.iterdir() if p.is_file() and p.suffix.lower() in IMAGE_EXTS]
-    files.sort(key=lambda p: p.name.lower())
+    files.sort(key=lambda p: _natural_filename_key(p.name))
     return files
 
 
@@ -483,6 +499,7 @@ def api_batch_results(
     return {
         "success": True,
         "docType": doc_type,
+        "sortedBy": "filename_asc",
         "page": page,
         "pageSize": pageSize,
         "total": total,

@@ -46,27 +46,63 @@ async def _load_image_from_request(request: Request, file: UploadFile | None) ->
     return decode_image_from_base64(payload.imageBase64), payload.options
 
 
-def _recognize_idcard_document(image, options) -> tuple[dict, str]:
-    """身份证：增强预处理 OCR；若关键字段偏少则再用仅缩放图重试，取更完整结果。"""
-    from app.extractors import extract_idcard, idcard_result_score
+def _document_result_score(fields: dict[str, dict]) -> int:
+    score = 0
+    for item in fields.values():
+        val = item.get("value")
+        if val in ("", None, []):
+            continue
+        if isinstance(val, str):
+            score += 2 if len(val) >= 4 else 1
+        else:
+            score += 1
+    return score
+
+
+def _recognize_document(doc_type: DocumentType, image, options) -> tuple[dict, str]:
+    """证件类：旋转+黑白增强 OCR；偏弱时对四向旋转各试一次，取字段更完整结果。"""
+    from app.extractors import extract_by_doc_type, extract_idcard, idcard_result_score
     from app.ocr_engine import run_ocr
-    from app.preprocess import idcard_image_pipeline, image_pipeline
+    from app.preprocess import document_image_pipeline, image_pipeline, iter_document_orientations, to_grayscale_enhanced
+
+    score_fn = idcard_result_score if doc_type == DocumentType.idcard else _document_result_score
+    extract_fn = extract_idcard if doc_type == DocumentType.idcard else lambda lines: extract_by_doc_type(doc_type, lines)
+    opts = options or {}
+
+    def _run(img) -> tuple[dict, str, int]:
+        lines = run_ocr(img, handwriting=False)
+        fields, _, _, text = extract_fn(lines)
+        return fields, text, score_fn(fields)
 
     best_fields: dict | None = None
     best_text = ""
     best_score = -1
-    for img in (idcard_image_pipeline(image, options), image_pipeline(image, options)):
-        lines = run_ocr(img, handwriting=False)
-        fields, _, _, text = extract_idcard(lines)
-        score = idcard_result_score(fields)
+
+    for img in (document_image_pipeline(image, opts), image_pipeline(image, opts)):
+        fields, text, score = _run(img)
         if score > best_score:
             best_score = score
             best_fields = fields
             best_text = text
-        if score >= 10:
+        if doc_type == DocumentType.idcard and score >= 10:
             break
+
+    retry_threshold = 10 if doc_type == DocumentType.idcard else 8
+    if best_score < retry_threshold:
+        for rotated, angle in iter_document_orientations(image):
+            img = to_grayscale_enhanced(image_pipeline(rotated, opts))
+            fields, text, score = _run(img)
+            if score > best_score:
+                best_score = score
+                best_fields = fields
+                best_text = text
+
     assert best_fields is not None
     return best_fields, best_text
+
+
+def _recognize_idcard_document(image, options) -> tuple[dict, str]:
+    return _recognize_document(DocumentType.idcard, image, options)
 
 
 async def _recognize_handwriting_from_request(
@@ -167,16 +203,8 @@ async def ocr_document(doc_type: DocumentType, request: Request, file: UploadFil
             fields, text = await _recognize_handwriting_from_request(request, file)
         else:
             image, options = await _load_image_from_request(request, file)
-            if doc_type == DocumentType.idcard:
-                fields, text = _recognize_idcard_document(image, options)
-            else:
-                from app.extractors import extract_by_doc_type
-                from app.ocr_engine import run_ocr
-                from app.preprocess import image_pipeline
-
-                image = image_pipeline(image, options)
-                lines = run_ocr(image, handwriting=False)
-                fields, _, _, text = extract_by_doc_type(doc_type, lines)
+            if doc_type in {DocumentType.idcard, DocumentType.driver_license, DocumentType.vehicle_license}:
+                fields, text = _recognize_document(doc_type, image, options)
         elapsed = int((time.perf_counter() - started) * 1000)
         log_success(
             kind,
