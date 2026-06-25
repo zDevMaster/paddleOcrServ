@@ -34,7 +34,7 @@ def get_ocr_engine() -> "PaddleOCR":
 
     **不在模块顶层 import paddleocr**，避免阻塞 uvicorn 绑定端口；首次识别时再加载（/health 可立刻响应）。
 
-    模型由环境变量选择（与 startupV4m.bat / startupv5m.bat / startupv5s.bat 一致）：
+    模型由环境变量选择（与 startupV4m.bat / startupv5*.bat / startupv6*.bat 一致）：
     - ``OCR_DET_MODEL_NAME`` / ``OCR_REC_MODEL_NAME``：PaddleX 模型名，如 ``PP-OCRv5_server_det``。
     - ``OCR_DET_MODEL_DIR`` / ``OCR_REC_MODEL_DIR``：推理目录；未设置时默认为
       ``offline_bundle/models/<模型名>_infer``。

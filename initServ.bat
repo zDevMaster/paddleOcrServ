@@ -73,5 +73,5 @@ if errorlevel 1 (
 )
 
 echo.
-echo [initServ] 完成。请运行启动脚本之一：startupV4m.bat、startupv5m.bat、startupv5s.bat
+echo [initServ] 完成。请运行启动脚本之一：startupV4m.bat、startupv5m.bat、startupv5s.bat、startupv6t.bat、startupv6m.bat、startupv6s.bat
 exit /b 0

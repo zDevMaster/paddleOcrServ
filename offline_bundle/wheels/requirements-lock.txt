@@ -27,14 +27,14 @@ markdown-it-py==4.0.0
 mdurl==0.1.2
 modelscope==1.35.2
 networkx==3.6.1
-numpy==2.4.3
+numpy==2.3.5
 opencv-contrib-python==4.10.0.84
 opencv-python-headless==4.13.0.92
 opt-einsum==3.3.0
 packaging==26.0
-paddleocr==3.4.0
+paddleocr==3.7.0
 paddlepaddle==3.3.1
-paddlex==3.4.3
+paddlex==3.7.2
 pandas==3.0.1
 pillow==12.1.1
 prettytable==3.17.0

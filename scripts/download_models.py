@@ -4,6 +4,7 @@ import argparse
 import shutil
 import tarfile
 import tempfile
+import time
 import urllib.request
 from pathlib import Path
 
@@ -14,7 +15,7 @@ _BOS_BASE = (
 )
 
 # 键：解压后目录名（与 tar 内顶层目录一致）；值：文件名
-# 含 v4/v5 mobile 与 v5 server，供 startupV4m.bat / startupv5m.bat / startupv5s.bat 选用
+# 含 v4/v5/v6 推理包，供各 startup*.bat 选用
 MODEL_TARS = {
     "PP-OCRv4_mobile_det_infer": "PP-OCRv4_mobile_det_infer.tar",
     "PP-OCRv4_mobile_rec_infer": "PP-OCRv4_mobile_rec_infer.tar",
@@ -22,6 +23,12 @@ MODEL_TARS = {
     "PP-OCRv5_mobile_rec_infer": "PP-OCRv5_mobile_rec_infer.tar",
     "PP-OCRv5_server_det_infer": "PP-OCRv5_server_det_infer.tar",
     "PP-OCRv5_server_rec_infer": "PP-OCRv5_server_rec_infer.tar",
+    "PP-OCRv6_tiny_det_infer": "PP-OCRv6_tiny_det_infer.tar",
+    "PP-OCRv6_tiny_rec_infer": "PP-OCRv6_tiny_rec_infer.tar",
+    "PP-OCRv6_small_det_infer": "PP-OCRv6_small_det_infer.tar",
+    "PP-OCRv6_small_rec_infer": "PP-OCRv6_small_rec_infer.tar",
+    "PP-OCRv6_medium_det_infer": "PP-OCRv6_medium_det_infer.tar",
+    "PP-OCRv6_medium_rec_infer": "PP-OCRv6_medium_rec_infer.tar",
 }
 
 
@@ -33,6 +40,23 @@ def _paddlex_model_complete(target_dir: Path) -> bool:
         and (target_dir / "inference.pdiparams").is_file()
         and (target_dir / "inference.json").is_file()
     )
+
+
+def _download_with_retry(url: str, dest: Path, *, attempts: int = 5) -> None:
+    last_err: BaseException | None = None
+    for i in range(1, attempts + 1):
+        try:
+            if dest.is_file():
+                dest.unlink()
+            print(f"downloading ({i}/{attempts}) ...")
+            urllib.request.urlretrieve(url, dest)
+            return
+        except Exception as exc:  # noqa: BLE001 — 网络抖动需重试
+            last_err = exc
+            wait = min(2**i, 30)
+            print(f"download failed: {exc}; retry in {wait}s")
+            time.sleep(wait)
+    raise RuntimeError(f"download failed after {attempts} attempts: {url}") from last_err
 
 
 def download_and_extract(folder_name: str, tar_filename: str, output_dir: Path) -> None:
@@ -49,9 +73,9 @@ def download_and_extract(folder_name: str, tar_filename: str, output_dir: Path) 
     with tempfile.TemporaryDirectory() as tmp:
         tar_path = Path(tmp) / tar_filename
         print(f"downloading {tar_filename} ...")
-        urllib.request.urlretrieve(url, tar_path)
+        _download_with_retry(url, tar_path)
         with tarfile.open(tar_path, "r:*") as tf:
-            tf.extractall(path=tmp)
+            tf.extractall(path=tmp, filter="data")
         extracted = Path(tmp) / folder_name
         if not extracted.is_dir():
             subdirs = [p for p in Path(tmp).iterdir() if p.is_dir()]

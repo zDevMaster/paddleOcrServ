@@ -20,6 +20,12 @@ MODEL_DIRS = (
     "PP-OCRv5_mobile_rec_infer",
     "PP-OCRv5_server_det_infer",
     "PP-OCRv5_server_rec_infer",
+    "PP-OCRv6_tiny_det_infer",
+    "PP-OCRv6_tiny_rec_infer",
+    "PP-OCRv6_small_det_infer",
+    "PP-OCRv6_small_rec_infer",
+    "PP-OCRv6_medium_det_infer",
+    "PP-OCRv6_medium_rec_infer",
 )
 
 

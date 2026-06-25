@@ -27,7 +27,8 @@
 ## 4. 部署运行结论（本次会话已验证）
 - **Agent 约定**：每次修改 `app/` 内微服务代码后，在同一会话内自行重启 OCR 微服务（`8000`），便于用户直接测试。
 - Windows 上不要用 `gunicorn` 运行（依赖 `fcntl`，不可用）。
-- Windows 推荐用根目录 `startupV4m.bat` / `startupv5m.bat` / `startupv5s.bat`（内部 `uvicorn` 多进程，见 README）。
+- Windows 推荐用根目录 `startupV4m.bat` / `startupv5*.bat` / `startupv6*.bat`（内部 `uvicorn`，见 README）。
+- PP-OCRv6 需 paddleocr ≥ 3.7.0；模型见 `offline_bundle/models/PP-OCRv6_*_infer`。
 - `run.ps1` 历史上有 `Host` 参数与 PowerShell 内置变量冲突风险，不作为主入口。
 - 内网环境建议设置 `PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=1`，避免联网检查卡顿。
 

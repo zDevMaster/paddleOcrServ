@@ -2,7 +2,7 @@
 
 **相关文档**
 
-- **[服务器部署.md](服务器部署.md)**：内网 Windows 服务器拷贝清单、**`initServ.bat` 离线初始化 `.venv`**、手动离线 pip、`startupV4m.bat` / `startupv5m.bat` / `startupv5s.bat` 启动、任务计划开机自启  
+- **[服务器部署.md](服务器部署.md)**：内网 Windows 服务器拷贝清单、**`initServ.bat` 离线初始化 `.venv`**、手动离线 pip、`startupV4m.bat` / `startupv5*.bat` / `startupv6*.bat` 启动、任务计划开机自启  
 - **[CSharp-IIS-调用示例.md](CSharp-IIS-调用示例.md)**：IIS 场景下 C# 调用示例（JSON base64 等）
 
 面向 IIS 下 C# 多线程 HTTP 调用的 OCR 服务模板，目标：
@@ -94,7 +94,7 @@ pip install -r requirements.txt
 python -m gunicorn -c gunicorn_conf.py app.main:app
 ```
 
-> 说明：`run.ps1` 依赖的参数名可能与 PowerShell 内置变量冲突；Windows 日常请以根目录 **`startupV4m.bat` / `startupv5m.bat` / `startupv5s.bat`** 为准。详见 [服务器部署.md](服务器部署.md)。
+> 说明：`run.ps1` 依赖的参数名可能与 PowerShell 内置变量冲突；Windows 日常请以根目录 **`startupV4m.bat` / `startupv5*.bat` / `startupv6*.bat`** 为准。详见 [服务器部署.md](服务器部署.md)。
 
 ## 7. IIS 部署（内网）
 常见方式是 IIS 反向代理到本服务（例如 `http://127.0.0.1:8000`）：
@@ -105,7 +105,7 @@ python -m gunicorn -c gunicorn_conf.py app.main:app
 
 ## 8. 并发与稳定建议
 - 单请求内部保持串行，避免在请求内并发 OCR。
-- 调整 `OCR_WORKERS`：Windows 下启动脚本**默认 1**（避免 uvicorn 多进程在 Windows 上出现 `OSError: WinError 10022`；内存充足且多 worker 在你的环境可稳定运行时，可 `set OCR_WORKERS=N`）。`startupv5s.bat` 大模型若出现子进程退出，可保持 1 或换 `startupv5m.bat` / `startupV4m.bat`。
+- 调整 `OCR_WORKERS`：Windows 下启动脚本**默认 1**（避免 uvicorn 多进程在 Windows 上出现 `OSError: WinError 10022`；内存充足且多 worker 在你的环境可稳定运行时，可 `set OCR_WORKERS=N`）。`startupv5s.bat` / `startupv6s.bat` 大模型若出现子进程退出，可保持 1 或换更小档模型脚本。
 - 生产建议加请求日志（带 `traceId`）与图片留档策略（按合规要求存储）。
 
 ## 9. 内网离线部署准备（外网机器先打包）
@@ -172,7 +172,7 @@ pip download paddlepaddle==<cpu_version> -d paddle
 ```
 
 ### 10.4 准备 PaddleOCR 模型文件
-PaddleOCR 3.x（PaddleX）需使用带 `inference.yml` 的官方推理包。请执行 `python scripts/download_models.py --output offline_bundle/models`（从百度 BOS 拉取 `PP-OCRv5_server_*_infer.tar` 并解压）。旧版仅含 `inference.pdmodel` 的目录无法用于当前服务。
+PaddleOCR 3.x（PaddleX）需使用带 `inference.yml` 的官方推理包。请执行 `python scripts/download_models.py --output offline_bundle/models`（从百度 BOS 拉取 v4/v5/v6 推理 tar 并解压）。旧版仅含 `inference.pdmodel` 的目录无法用于当前服务。**PP-OCRv6 需 paddleocr ≥ 3.7.0**（见 `requirements.txt`）。
 
 ## 11. 内网服务器需要安装的内容（清单）
 
@@ -238,18 +238,21 @@ pip install --no-index --find-links .\offline_bundle\wheels --find-links .\offli
 
 ## 13. 启动服务指令（Windows）
 
-根目录提供 **三种** 启动脚本，均使用 **uvicorn**，并默认设置 `PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK`、`FLAGS_use_mkldnn` 等；**Windows 默认 `OCR_WORKERS=1`**（启动前 `set OCR_WORKERS=N` 可覆盖；多 worker 在 Windows 上可能触发套接字错误，见 [服务器部署.md](服务器部署.md) 常见问题）。
+根目录提供 **六种** 启动脚本（v4/v5/v6），均使用 **uvicorn**，并默认设置 `PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK`、`FLAGS_use_mkldnn` 等；**Windows 默认 `OCR_WORKERS=1`**（启动前 `set OCR_WORKERS=N` 可覆盖；多 worker 在 Windows 上可能触发套接字错误，见 [服务器部署.md](服务器部署.md) 常见问题）。
 
 | 脚本 | 检测模型 | 识别模型 | 说明 |
 |------|-----------|-----------|------|
 | `startupV4m.bat` | `PP-OCRv4_mobile_det` | `PP-OCRv4_mobile_rec` | 体积极小、速度快，精度低于 v5 |
 | `startupv5m.bat` | `PP-OCRv5_mobile_det` | `PP-OCRv5_mobile_rec` | v5 mobile，速度与精度折中 |
-| `startupv5s.bat` | `PP-OCRv5_server_det` | `PP-OCRv5_server_rec` | 默认高精度，**内存与 CPU 占用最高**；多 worker 时更易 OOM |
+| `startupv5s.bat` | `PP-OCRv5_server_det` | `PP-OCRv5_server_rec` | v5 高精度，内存与 CPU 占用高 |
+| `startupv6t.bat` | `PP-OCRv6_tiny_det` | `PP-OCRv6_tiny_rec` | v6 端侧轻量，速度快 |
+| `startupv6m.bat` | `PP-OCRv6_small_det` | `PP-OCRv6_small_rec` | **v6 推荐折中**（证件/手写） |
+| `startupv6s.bat` | `PP-OCRv6_medium_det` | `PP-OCRv6_medium_rec` | v6 高精度，替代 v5 server |
 
 模型目录默认相对项目根：`offline_bundle/models/<模型名>_infer`（由 `scripts/download_models.py` 下载）。若模型在其他盘，可设置 `OCR_DET_MODEL_DIR` / `OCR_REC_MODEL_DIR`（绝对路径）。
 
-**前台**：双击或在 cmd 中执行 `startupv5m.bat`（按需换脚本）。  
-**后台**（新开最小化窗口）：`startupv5m.bat bg`，或 `set OCR_BACKGROUND=1` 后执行同一脚本。
+**前台**：双击或在 cmd 中执行 `startupv6m.bat`（按需换脚本）。  
+**后台**（新开最小化窗口）：`startupv6m.bat bg`，或 `set OCR_BACKGROUND=1` 后执行同一脚本。
 
 可选环境变量（在运行前于同一 cmd 窗口 `set`，可覆盖脚本内默认值）：
 
