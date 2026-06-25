@@ -21,16 +21,15 @@
 ### `GET /health`
 健康检查（**不加载** PaddleOCR 模型，进程启动后即可访问）。首次调用识别接口时才会加载检测/识别模型，可能较慢。
 
-### `POST /v1/ocr/general`
-通用手写/签名类 OCR：与下方 **`handwriting`** 为**同一套处理与抽取逻辑**，返回 `data.docType` 均为 **`handwriting`**（全文 / 行文本 / 置信度等字段一致）。仅路径不同，任选其一即可。
-
 ### `POST /v1/ocr/document/{doc_type}`
-证件 OCR（结构化字段 + 原始 OCR + 校验 + 质量）  
+统一识别入口（结构化字段 + 全文文本）  
 `doc_type` 支持：
 - `idcard`
 - `driver_license`
 - `vehicle_license`
-- `handwriting`（与 **`/v1/ocr/general`** 等价，见上）
+- `handwriting`（手写/签名类 OCR）
+
+> 历史上的 **`POST /v1/ocr/general`** 已**移除**；手写请统一调用 **`/v1/ocr/document/handwriting`**，与证件类路径保持一致。
 
 ## 2.1 日志文件（`app/logs/`）
 
@@ -232,7 +231,7 @@ pip install --no-index --find-links .\offline_bundle\wheels --find-links .\offli
 
 ### 12.3 手写中文签名（接口行为与模型选型参考）
 
-- **`/v1/ocr/general`** 与 **`/v1/ocr/document/handwriting`**：在 `extract_handwriting` 中 **去除拉丁字母（含全角英文）、数字（含全角与 Unicode 数字类）、标点、符号、空白**，保留汉字（Unicode `Lo`，含扩展 B/C 等）；`data.text` 与 `fields` 均为过滤后内容。
+- **`/v1/ocr/document/handwriting`**：在 `extract_handwriting` 中 **去除拉丁字母（含全角英文）、数字（含全角与 Unicode 数字类）、标点、符号、空白**，保留汉字（Unicode `Lo`，含扩展 B/C 等）；`data.text` 与 `fields` 均为过滤后内容。
 - **速度**：`PP-OCRv4_mobile` 识别包更小，CPU 上通常快于 v5 server，适合重吞吐场景（见根目录 `startupV4m.bat`）。
 - **更强通用手写**：PaddleOCR **PP-OCRv5** 在官方说明中强化了多场景手写能力，可与 v4 mobile 对比实测后选型。
 - **专用「签名」模型**：公开生态里单独针对「连笔签名」的即用模型较少；常见路径是用手写汉字数据（如 **CASIA-HWDB** 系列）在通用识别模型上 **微调**，或沿用通用 OCR + 业务侧汉字过滤（即本服务当前策略）。

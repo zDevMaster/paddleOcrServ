@@ -58,13 +58,13 @@ def _ocr_request_error_detail(exc: BaseException, target: str) -> str:
         extra = (
             "常见原因：OCR 正在首次加载模型（CPU 上可能需数分钟），测试站等待超时。"
             "请在运行测试站的终端执行 set OCR_UPSTREAM_TIMEOUT=1200 后重启测试站，"
-            "或在 OCR 服务器本机浏览器先访问一次 /v1/ocr/general 完成预热。"
+            "或在 OCR 服务器本机浏览器先访问一次 /v1/ocr/document/handwriting 完成预热。"
         )
     elif "ReadError" in name or "RemoteProtocolError" in name:
         extra = (
             "常见原因：读响应时连接被对端关闭——多见于 OCR 推理中进程崩溃（如内存不足 OOM）、"
             "worker 被系统终止、或推理过久导致连接异常。请查看运行启动脚本（如 startupv5s.bat）的窗口是否有 Python 报错；"
-            "可尝试启动前 set OCR_WORKERS=1 降低内存占用，并在本机先单独调用一次 /v1/ocr/general 完成预热。"
+            "可尝试启动前 set OCR_WORKERS=1 降低内存占用，并在本机先单独调用一次 /v1/ocr/document/handwriting 完成预热。"
             "测试站会对 ReadError 自动重试（次数由 OCR_POST_RETRIES 控制，默认 2 次重试）。"
         )
     elif "ConnectTimeout" in name or "ConnectError" in name:
@@ -258,7 +258,7 @@ async def api_handwriting_submit(
     file: UploadFile = File(...),
     ocrBase: str = Form(DEFAULT_OCR_BASE),
 ):
-    """画布手写签名：保存为 test/data/HandWrite/{纳秒tick}.png，以 JSON+imageBase64 调用 /v1/ocr/general，写回同名 .json。"""
+    """画布手写签名：保存为 test/data/HandWrite/{纳秒tick}.png，以 JSON+imageBase64 调用 /v1/ocr/document/handwriting，写回同名 .json。"""
     ocr_base = (ocrBase or DEFAULT_OCR_BASE).rstrip("/")
     content = await file.read()
     await _require_ocr_service(ocr_base)
@@ -270,7 +270,7 @@ async def api_handwriting_submit(
     img_path = folder / f"{stem}.png"
     img_path.write_bytes(content)
 
-    target = f"{ocr_base}/v1/ocr/general"
+    target = f"{ocr_base}/v1/ocr/document/handwriting"
     json_body = _ocr_json_body_from_bytes(content)
     retries = max(0, int(os.getenv("OCR_POST_RETRIES", "2")))
     retry_delay = float(os.getenv("OCR_POST_RETRY_DELAY_SEC", "2"))
@@ -378,9 +378,7 @@ async def api_recognize(
 
     await _require_ocr_service(ocr_base)
 
-    if doc_type == "handwriting":
-        target = f"{ocr_base}/v1/ocr/general"
-    elif doc_type in {"idcard", "vehicle_license", "driver_license"}:
+    if doc_type in {"idcard", "vehicle_license", "driver_license", "handwriting"}:
         target = f"{ocr_base}/v1/ocr/document/{doc_type}"
     else:
         raise HTTPException(status_code=400, detail="docType must be one of idcard/vehicle_license/driver_license/handwriting")
@@ -421,10 +419,7 @@ async def api_batch_run(req: BatchRequest):
     pending = _pending_images(folder)
     to_process = pending[:batch_size]
 
-    if doc_type == "handwriting":
-        target = f"{ocr_base}/v1/ocr/general"
-    else:
-        target = f"{ocr_base}/v1/ocr/document/{doc_type}"
+    target = f"{ocr_base}/v1/ocr/document/{doc_type}"
     processed = []
     failed = []
     async with httpx.AsyncClient(timeout=_ocr_upstream_timeout()) as client:

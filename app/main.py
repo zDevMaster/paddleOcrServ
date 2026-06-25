@@ -26,10 +26,6 @@ _DOC_KIND = {
     DocumentType.driver_license: KIND_DRIVER_LICENSE,
     DocumentType.handwriting: KIND_HANDWRITING,
 }
-
-# `/v1/ocr/general` 与 `/v1/ocr/document/handwriting` 共用同一套流水线，响应 data.docType 统一为该值。
-HANDWRITING_RESPONSE_DOC_TYPE = "handwriting"
-
 app = FastAPI(title="Intranet OCR Service", version="1.0.0")
 
 # 单进程内的 OCR 执行互斥：同一时刻只允许一路识别（保持 1 worker，亦保护 Paddle 引擎单例）。
@@ -179,54 +175,6 @@ def _build_response(
 @app.get("/health")
 def health():
     return {"success": True, "status": "ok"}
-
-
-@app.post("/v1/ocr/general", response_model=OcrResponse)
-async def ocr_general(request: Request, file: UploadFile | None = File(default=None)):
-    if not await _acquire_ocr_slot():
-        return _busy_response(HANDWRITING_RESPONSE_DOC_TYPE)
-    started = time.perf_counter()
-    trace_id = uuid.uuid4().hex
-    kind = KIND_HANDWRITING
-
-    try:
-        image, options = await _load_image_from_request(request, file)
-        fields, text = await asyncio.to_thread(_recognize_handwriting_image, image, options)
-        elapsed = int((time.perf_counter() - started) * 1000)
-        log_success(
-            kind,
-            trace_id,
-            elapsed,
-            {"docType": HANDWRITING_RESPONSE_DOC_TYPE, "text": text, "fields": fields},
-        )
-        return _build_response(trace_id, elapsed, HANDWRITING_RESPONSE_DOC_TYPE, fields, text)
-    except HTTPException as exc:
-        elapsed = int((time.perf_counter() - started) * 1000)
-        log_error(
-            kind,
-            trace_id,
-            elapsed,
-            category="client_error",
-            message=f"HTTP {exc.status_code} detail={exc.detail!s}",
-            traceback_text=None,
-        )
-        raise
-    except Exception as exc:
-        elapsed = int((time.perf_counter() - started) * 1000)
-        log_error(
-            kind,
-            trace_id,
-            elapsed,
-            category="exception",
-            message=str(exc),
-            traceback_text=traceback.format_exc(),
-        )
-        raise HTTPException(
-            status_code=500,
-            detail=f"识别过程异常: {exc!s}",
-        ) from exc
-    finally:
-        _OCR_LOCK.release()
 
 
 @app.post("/v1/ocr/document/{doc_type}", response_model=OcrResponse)

@@ -8,8 +8,8 @@
 
 ## 2. 当前 API 契约（不可随意破坏）
 - `GET /health`
-- `POST /v1/ocr/general`
 - `POST /v1/ocr/document/{doc_type}`：`idcard` / `vehicle_license` / `driver_license` / `handwriting`
+- 已移除 `POST /v1/ocr/general`；手写统一走 `/v1/ocr/document/handwriting`，与证件类一致
 
 返回结构（已定版）：
 - 顶层：`success`、`traceId`、`elapsedMs`

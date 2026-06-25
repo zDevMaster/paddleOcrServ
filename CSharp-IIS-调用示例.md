@@ -25,7 +25,7 @@
 说明：
 - 缺失字段也会返回在 `fields` 中，只是 `value=""`
 - 业务端建议统一走 `fields["字段名"].value` 映射到实体
-- **手写 / 签名类**：调用 **`POST /v1/ocr/general`** 与 **`POST /v1/ocr/document/handwriting`** 时，返回的 **`data.docType` 均为字符串 `handwriting`**（处理逻辑与 `fields` 结构一致，仅 URL 不同）。客户端请按 `handwriting` 解析，**不要**再依赖已废弃的 `general` 作为 `docType`。
+- **手写 / 签名类**：统一调用 **`POST /v1/ocr/document/handwriting`**，与身份证 / 行驶证路径一致；返回的 **`data.docType` 为字符串 `handwriting`**。历史上的 **`/v1/ocr/general` 已移除**，请勿再调用。
 
 ### 1.1 服务忙（多服务端负载切换）
 
@@ -77,8 +77,8 @@ public OcrResponse RecognizeWithFailover(string base64, string docType)
 约定：
 
 - **身份证、行驶证、驾驶证**：请先将**图片文件读入字节**，再 **`Convert.ToBase64String`**，以 **`application/json`** 提交到 **`/v1/ocr/document/{doc_type}`**。
-- **手写 / 签名**：与上相同方式传图，可调用 **`/v1/ocr/general`** 或 **`/v1/ocr/document/handwriting`**（二者等价，见 §1）。**不要**带 `data:image/...;base64,` 前缀，与微服务 `ImageJsonRequest` 一致。
-- **亦可**使用 **`multipart/form-data`** 直接上传文件字段 `file`（见下文 `PostDocumentByFile` / `PostGeneralByFile`），与 JSON 二选一即可。
+- **手写 / 签名**：与上相同方式传图，调用 **`/v1/ocr/document/handwriting`**（即 `docType=handwriting`，见 §1）。**不要**带 `data:image/...;base64,` 前缀，与微服务 `ImageJsonRequest` 一致。
+- **亦可**使用 **`multipart/form-data`** 直接上传文件字段 `file`（见下文 `PostDocumentByFile` / `PostHandwritingByFile`），与 JSON 二选一即可。
 - **与本仓库 `test` 测试站的关系**：`test/test_site.py` 转发 OCR 时已与上文一致，使用 **`application/json` + `imageBase64`**（浏览器到测试站仍为表单/文件上传，由测试站读字节后编码再调微服务）。
 - 公开方法为**同步**（无 `async`/`await`）；内部可用 `HttpClient.Send`（**.NET 5+**）或 `SendAsync(...).GetAwaiter().GetResult()`（**.NET Framework**）。
 - **`OcrHttpClient`**：构造时若传入**系统已注册/单例的 `HttpClient`**（如 DI），则**直接使用**；若未传入，则类内使用**进程级单例** `HttpClient`（懒创建、全进程复用），**无需**在 `Application_Start` 里单独初始化客户端类型本身。
@@ -236,28 +236,20 @@ public class OcrHttpClient
         return PostDocumentByBase64(docType, b64);
     }
 
-    /// <summary>手写/通用 OCR（与 PostDocumentByBase64("handwriting", …) 等价；响应 data.docType 均为 handwriting）。</summary>
-    public OcrResponseDto PostGeneralByBase64(string imageBase64)
+    /// <summary>手写/签名 OCR（等价于 PostDocumentByBase64("handwriting", …)；统一走 /v1/ocr/document/handwriting）。</summary>
+    public OcrResponseDto PostHandwritingByBase64(string imageBase64)
     {
         if (string.IsNullOrWhiteSpace(imageBase64))
             throw new ArgumentException("imageBase64 不能为空", nameof(imageBase64));
-
-        var url = $"{_baseUrl}/v1/ocr/general";
-        var body = new { imageBase64 = imageBase64 };
-        var json = JsonConvert.SerializeObject(body);
-        using var req = new HttpRequestMessage(HttpMethod.Post, url)
-        {
-            Content = new StringContent(json, Encoding.UTF8, "application/json"),
-        };
-        return SendAndDeserialize(req);
+        return PostDocumentByBase64("handwriting", imageBase64);
     }
 
-    public OcrResponseDto PostGeneralByFilePathBase64(string imageFilePath)
+    public OcrResponseDto PostHandwritingByFilePathBase64(string imageFilePath)
     {
         if (string.IsNullOrWhiteSpace(imageFilePath) || !File.Exists(imageFilePath))
             throw new FileNotFoundException("图片文件不存在", imageFilePath);
         var b64 = Convert.ToBase64String(File.ReadAllBytes(imageFilePath));
-        return PostGeneralByBase64(b64);
+        return PostHandwritingByBase64(b64);
     }
 
     /// <summary>证件类（可选）：multipart 直传文件，无需事先 Base64。</summary>
@@ -279,13 +271,13 @@ public class OcrHttpClient
         return SendAndDeserialize(req);
     }
 
-    /// <summary>通用 OCR（可选）：multipart 直传文件。</summary>
-    public OcrResponseDto PostGeneralByFile(string imageFilePath)
+    /// <summary>手写 OCR（可选）：multipart 直传文件，统一走 /v1/ocr/document/handwriting。</summary>
+    public OcrResponseDto PostHandwritingByFile(string imageFilePath)
     {
         if (string.IsNullOrWhiteSpace(imageFilePath) || !File.Exists(imageFilePath))
             throw new FileNotFoundException("图片文件不存在", imageFilePath);
 
-        var url = $"{_baseUrl}/v1/ocr/general";
+        var url = $"{_baseUrl}/v1/ocr/document/handwriting";
         using var form = new MultipartFormDataContent();
         using var fs = File.OpenRead(imageFilePath);
         using var fileContent = new StreamContent(fs);
@@ -338,7 +330,7 @@ var id = ocr.PostDocumentByFilePathBase64("idcard", @"G:\data\a.jpg");
 
 > 以下示例使用你给出的实体：`zOcrRes_IdentyCard`、`zOcrRes_VehicleLicense`、`zOcrRes_DrivingLicense`、`zOcrRes_HandWriting`  
 > 参数 **`imageFilePath`**：图片在本机上的完整路径，例如 `G:\share\ocr\in\idcard_001.jpg`。  
-> 识别时由 `PostDocumentByFilePathBase64` / `PostGeneralByFilePathBase64` **内部**执行 `File.ReadAllBytes` → `Convert.ToBase64String` 后再 `POST` JSON；若图中已在内存，可改调 **`PostDocumentByBase64`** / **`PostGeneralByBase64`**。
+> 识别时由 `PostDocumentByFilePathBase64` / `PostHandwritingByFilePathBase64` **内部**执行 `File.ReadAllBytes` → `Convert.ToBase64String` 后再 `POST` JSON；若图已在内存，可改调 **`PostDocumentByBase64`** / **`PostHandwritingByBase64`**。
 
 可在业务类中持有**一个** `OcrHttpClient` 字段（构造时传入 `HttpClient` 或省略），识别方法均为**同步**。
 
@@ -424,16 +416,16 @@ public zOcrRes_DrivingLicense RecognizeDrivingLicense(string imageFilePath, stri
 }
 ```
 
-### 3.4 手写识别（`/v1/ocr/general` 或 `/v1/ocr/document/handwriting`）
+### 3.4 手写识别（`/v1/ocr/document/handwriting`）
 
-两种方式**返回一致**：`data.docType == "handwriting"`，`fields` 含 `全文`、`行文本`、`置信度` 等。
+`data.docType == "handwriting"`，`fields` 含 `全文`、`行文本`、`置信度` 等。
 
 ```csharp
 public zOcrRes_HandWriting RecognizeHandWriting(string imageFilePath, string logKey)
 {
     var client = new OcrHttpClient("http://127.0.0.1:8000");
-    // 任选其一（与 PostDocumentByFilePathBase64("handwriting", imageFilePath) 等价）
-    var resp = client.PostGeneralByFilePathBase64(imageFilePath);
+    // 与 PostDocumentByFilePathBase64("handwriting", imageFilePath) 等价
+    var resp = client.PostHandwritingByFilePathBase64(imageFilePath);
     // var resp = client.PostDocumentByFilePathBase64("handwriting", imageFilePath);
 
     if (resp == null || !resp.Success) throw new Exception($"OCR失败，traceId={resp?.TraceId}");
@@ -479,8 +471,8 @@ var dto = RecognizeIdCard(@"G:\ocr\in\id.jpg", "OCR-LOG-20260327-0001");
 - 先看原始字符串，再做二次兼容解析；示例里已提供 `GetDate` 兜底解析。
 
 3) 必须用 Base64 吗？  
-- **本文推荐流程**为：读本地文件 → Base64 → JSON（`PostDocumentByFilePathBase64` 等）。若希望少一次编码，可直接使用 **`PostDocumentByFile`** / **`PostGeneralByFile`**（`multipart` 上传），微服务两种都支持。
+- **本文推荐流程**为：读本地文件 → Base64 → JSON（`PostDocumentByFilePathBase64` 等）。若希望少一次编码，可直接使用 **`PostDocumentByFile`** / **`PostHandwritingByFile`**（`multipart` 上传），微服务两种都支持。
 
 4) `docType` 何时为 `handwriting`？  
-- 调用 **`/v1/ocr/general`** 或 **`/v1/ocr/document/handwriting`** 时，响应 **`data.docType`** 均为 **`handwriting`**。若旧代码判断了 `general`，请改为 **`handwriting`**。
+- 调用 **`/v1/ocr/document/handwriting`** 时，响应 **`data.docType`** 为 **`handwriting`**。旧的 **`/v1/ocr/general` 已移除**，若旧代码仍在调用 `general`，请改为 `document/handwriting`。
 
