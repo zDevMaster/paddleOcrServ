@@ -27,6 +27,49 @@
 - 业务端建议统一走 `fields["字段名"].value` 映射到实体
 - **手写 / 签名类**：调用 **`POST /v1/ocr/general`** 与 **`POST /v1/ocr/document/handwriting`** 时，返回的 **`data.docType` 均为字符串 `handwriting`**（处理逻辑与 `fields` 结构一致，仅 URL 不同）。客户端请按 `handwriting` 解析，**不要**再依赖已废弃的 `general` 作为 `docType`。
 
+### 1.1 服务忙（多服务端负载切换）
+
+服务端保持 **单 worker、单路识别**。当某次识别进行中时，**新到的请求会立即返回**下面这种「忙」响应（HTTP 仍为 **200**）：
+
+```json
+{
+  "success": false,
+  "traceId": "",
+  "elapsedMs": 0,
+  "data": { "docType": "idcard", "fields": {}, "text": "" }
+}
+```
+
+判定规则：**`success == false` 且 `traceId == ""`** 即表示「该服务器正在识别中」（并非识别失败）。  
+据此可**部署多台 OCR 服务器**，客户端收到「忙」时**换下一台**重试：
+
+```csharp
+// 多服务端地址池，命中“忙”则切换
+private static readonly string[] OcrServers =
+{
+    "http://10.0.0.11:8000",
+    "http://10.0.0.12:8000",
+    "http://10.0.0.13:8000",
+};
+
+private static bool IsBusy(OcrResponse r) =>
+    r != null && !r.Success && string.IsNullOrEmpty(r.TraceId);
+
+public OcrResponse RecognizeWithFailover(string base64, string docType)
+{
+    foreach (var server in OcrServers)
+    {
+        var resp = PostDocumentBase64(server, docType, base64); // 你的调用封装
+        if (resp != null && !IsBusy(resp))
+            return resp;   // 拿到真正结果（成功或业务失败）
+        // 忙：继续尝试下一台
+    }
+    throw new Exception("所有 OCR 服务器均忙，请稍后重试");
+}
+```
+
+> 可在服务端启动前 `set OCR_REJECT_WHEN_BUSY=0` 关闭该行为，恢复为「排队等待」（不返回忙，请求会等前一笔完成）。
+
 ---
 
 ## 2. 通用 DTO 与调用客户端（同步；**推荐：文件 → Base64 → JSON**）
@@ -423,7 +466,7 @@ var dto = RecognizeIdCard(@"G:\ocr\in\id.jpg", "OCR-LOG-20260327-0001");
 - **`HttpClient`**：优先在 **DI** 中注册单例或由 **`IHttpClientFactory`** 创建，并传入 `OcrHttpClient` 第二个参数；未注入时依赖本文内置的**进程级单例**，**不必**在 `Application_Start` 里仅为 OCR 再挂一段初始化。
 - **同步调用**：在 ASP.NET **经典**管线中长时间阻塞可能占用线程池，若压测出现排队，可考虑改为异步接口或增大线程池；本文按你方要求保留同步写法。
 - 建议业务层增加超时、重试（仅对可重试错误）与日志（记录 `traceId`）。
-- OCR 是重计算任务，服务端主要靠 worker 数扩展；客户端不建议无限并发轰炸。
+- OCR 是重计算任务，服务端单路串行识别；**横向扩展靠多部署服务器**，客户端命中「忙」（`success=false` 且 `traceId=""`，见 §1.1）时切换到其它服务器。
 
 ---
 

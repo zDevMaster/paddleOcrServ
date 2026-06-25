@@ -105,6 +105,7 @@ python -m gunicorn -c gunicorn_conf.py app.main:app
 
 ## 8. 并发与稳定建议
 - 单请求内部保持串行，避免在请求内并发 OCR。
+- **服务忙即拒绝（默认开启）**：保持单 worker、单路识别；识别进行中时，新请求**立即返回** `success=false` 且 `traceId=""`（HTTP 200），表示「该服务器识别中」。据此可**多部署几台服务器**，客户端收到忙时切换到下一台（见 [CSharp-IIS-调用示例.md](CSharp-IIS-调用示例.md) §1.1）。设 `OCR_REJECT_WHEN_BUSY=0` 可改回「排队等待」。
 - 调整 `OCR_WORKERS`：Windows 下启动脚本**默认 1**（避免 uvicorn 多进程在 Windows 上出现 `OSError: WinError 10022`；内存充足且多 worker 在你的环境可稳定运行时，可 `set OCR_WORKERS=N`）。`startupv5s.bat` / `startupv6s.bat` 大模型若出现子进程退出，可保持 1 或换更小档模型脚本。
 - 生产建议加请求日志（带 `traceId`）与图片留档策略（按合规要求存储）。
 

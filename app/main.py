@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import os
+import threading
 import time
 import traceback
 import uuid
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.responses import JSONResponse
 
 from app.models import DocumentType, ImageJsonRequest, OcrResponse
 from app.recognition_log import (
@@ -28,6 +31,39 @@ _DOC_KIND = {
 HANDWRITING_RESPONSE_DOC_TYPE = "handwriting"
 
 app = FastAPI(title="Intranet OCR Service", version="1.0.0")
+
+# 单进程内的 OCR 执行互斥：同一时刻只允许一路识别（保持 1 worker，亦保护 Paddle 引擎单例）。
+# 识别计算经 asyncio.to_thread 置于线程池，事件循环保持空闲，因此能在「忙」时立即拒绝新请求。
+_OCR_LOCK = threading.Lock()
+
+
+def _reject_when_busy() -> bool:
+    """是否在识别中直接拒绝新请求（默认开启）。设 OCR_REJECT_WHEN_BUSY=0 可改回排队等待。"""
+    return os.getenv("OCR_REJECT_WHEN_BUSY", "1").strip().lower() not in {"0", "false", "no", "off"}
+
+
+async def _acquire_ocr_slot() -> bool:
+    """获取 OCR 执行权。
+
+    返回 True 表示已获得；返回 False 表示当前正在识别（仅「拒绝模式」会出现）。
+    排队模式下在线程中阻塞等待，避免占用事件循环。
+    """
+    if _reject_when_busy():
+        return _OCR_LOCK.acquire(blocking=False)
+    await asyncio.to_thread(_OCR_LOCK.acquire)
+    return True
+
+
+def _busy_response(doc_type: str) -> JSONResponse:
+    """服务忙：success=false 且 traceId=""，供多服务端部署时客户端切换到其它服务器。"""
+    return JSONResponse(
+        content={
+            "success": False,
+            "traceId": "",
+            "elapsedMs": 0,
+            "data": {"docType": doc_type, "fields": {}, "text": ""},
+        }
+    )
 
 
 async def _load_image_from_request(request: Request, file: UploadFile | None) -> tuple:
@@ -105,16 +141,12 @@ def _recognize_idcard_document(image, options) -> tuple[dict, str]:
     return _recognize_document(DocumentType.idcard, image, options)
 
 
-async def _recognize_handwriting_from_request(
-    request: Request,
-    file: UploadFile | None,
-) -> tuple[dict, str]:
-    """与 `/v1/ocr/document/handwriting` 相同：预处理 + 手写检测参数 + extract_handwriting。"""
+def _recognize_handwriting_image(image, options) -> tuple[dict, str]:
+    """手写/通用：预处理 + 手写检测参数 + extract_handwriting（CPU 密集，置于线程执行）。"""
     from app.extractors import extract_handwriting
     from app.ocr_engine import run_ocr
     from app.preprocess import ensure_min_edge, image_pipeline, pad_white_border
 
-    image, options = await _load_image_from_request(request, file)
     image = image_pipeline(image, options)
     min_edge = int(os.getenv("OCR_HANDWRITING_MIN_EDGE", "128"))
     image = ensure_min_edge(image, min_edge=min_edge)
@@ -151,12 +183,15 @@ def health():
 
 @app.post("/v1/ocr/general", response_model=OcrResponse)
 async def ocr_general(request: Request, file: UploadFile | None = File(default=None)):
+    if not await _acquire_ocr_slot():
+        return _busy_response(HANDWRITING_RESPONSE_DOC_TYPE)
     started = time.perf_counter()
     trace_id = uuid.uuid4().hex
     kind = KIND_HANDWRITING
 
     try:
-        fields, text = await _recognize_handwriting_from_request(request, file)
+        image, options = await _load_image_from_request(request, file)
+        fields, text = await asyncio.to_thread(_recognize_handwriting_image, image, options)
         elapsed = int((time.perf_counter() - started) * 1000)
         log_success(
             kind,
@@ -190,21 +225,24 @@ async def ocr_general(request: Request, file: UploadFile | None = File(default=N
             status_code=500,
             detail=f"识别过程异常: {exc!s}",
         ) from exc
+    finally:
+        _OCR_LOCK.release()
 
 
 @app.post("/v1/ocr/document/{doc_type}", response_model=OcrResponse)
 async def ocr_document(doc_type: DocumentType, request: Request, file: UploadFile | None = File(default=None)):
+    if not await _acquire_ocr_slot():
+        return _busy_response(doc_type.value)
     started = time.perf_counter()
     trace_id = uuid.uuid4().hex
     kind = _DOC_KIND[doc_type]
 
     try:
+        image, options = await _load_image_from_request(request, file)
         if doc_type == DocumentType.handwriting:
-            fields, text = await _recognize_handwriting_from_request(request, file)
+            fields, text = await asyncio.to_thread(_recognize_handwriting_image, image, options)
         else:
-            image, options = await _load_image_from_request(request, file)
-            if doc_type in {DocumentType.idcard, DocumentType.driver_license, DocumentType.vehicle_license}:
-                fields, text = _recognize_document(doc_type, image, options)
+            fields, text = await asyncio.to_thread(_recognize_document, doc_type, image, options)
         elapsed = int((time.perf_counter() - started) * 1000)
         log_success(
             kind,
@@ -238,3 +276,5 @@ async def ocr_document(doc_type: DocumentType, request: Request, file: UploadFil
             status_code=500,
             detail=f"识别过程异常: {exc!s}",
         ) from exc
+    finally:
+        _OCR_LOCK.release()

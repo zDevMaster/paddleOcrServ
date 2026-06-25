@@ -16,6 +16,7 @@
 - `data`：`docType`、`fields`、`text`
 - 已移除：`raw`、`validation`、`quality`、`missingFields`
 - 规则：结构化字段必须输出；缺失字段也要有键，且 `value=""`
+- **服务忙信号**：单 worker、单路识别；识别中收到的新请求立即返回 `success=false` 且 `traceId=""`（HTTP 200，`data.fields={}`），供多服务器部署时客户端切换。可 `OCR_REJECT_WHEN_BUSY=0` 改回排队。OCR 计算经 `asyncio.to_thread` 置于线程池 + 全局 `threading.Lock` 串行化。
 
 ## 3. OCR 与抽取策略要点
 - 每个进程内 OCR 模型单例（避免重复加载）。
